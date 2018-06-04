@@ -274,6 +274,10 @@ void VUniversalEntry::keyPressEvent(QKeyEvent *p_event)
 
         break;
 
+    case Qt::Key_Escape:
+        hide();
+        return;
+
     // Up/Down Ctrl+K/J to navigate to next item.
     case Qt::Key_Up:
         forward = false;
@@ -364,9 +368,9 @@ void VUniversalEntry::keyPressEvent(QKeyEvent *p_event)
 
         break;
 
-    case Qt::Key_T:
+    case Qt::Key_I:
         if (VUtils::isControlModifierForVim(modifiers)) {
-            // Ctrl+T to expand or collapse an item.
+            // Ctrl+I to expand or collapse an item.
             if (m_lastEntry) {
                 m_lastEntry->m_entry->toggleItemExpanded(m_lastEntry->m_id);
             }

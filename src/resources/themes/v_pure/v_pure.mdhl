@@ -38,11 +38,11 @@ color-column-foreground: ffff00
 # [VNote] Style for preview image line
 preview-image-line-foreground: 9575cd
 # [VNote] Style for MathJax
-mathjax-foreground: 8e24aa
+mathjax-foreground: 00897b
 
 editor-selection
-foreground: eeeeee
-background: 005fff
+foreground: f5f5f5
+background: 1976d2
 
 editor-current-line
 background: c5cae9
@@ -130,7 +130,7 @@ foreground: 93a1a1
 VERBATIM
 foreground: 673ab7
 font-family: Consolas, Monaco, Andale Mono, Monospace, Courier New
-# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, color)
+# [VNote] Codeblock sylte from HighlightJS (bold, italic, underlined, strikeout, color)
 # The last occurence of the same attribute takes effect
 # Could specify multiple attribute in one line
 hljs-comment: 6c6c6c
@@ -171,4 +171,5 @@ BLOCKQUOTE
 foreground: 00af00
 
 STRIKE
-strike-color: 586e75
+foreground: b71c1c
+font-style: strikeout

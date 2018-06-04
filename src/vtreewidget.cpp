@@ -44,10 +44,16 @@ VTreeWidget::VTreeWidget(QWidget *p_parent)
                 effect->setOpacity(SEARCH_INPUT_IDLE_OPACITY);
             });
 
-    m_delegate = new VStyledItemDelegate(this);
+    m_delegate = new VStyledItemDelegate(NULL, this);
     setItemDelegate(m_delegate);
 
     connect(this, &VTreeWidget::itemExpanded,
+            this, [this]() {
+                if (m_fitContent) {
+                    resizeColumnToContents(0);
+                }
+            });
+    connect(this, &VTreeWidget::itemCollapsed,
             this, [this]() {
                 if (m_fitContent) {
                     resizeColumnToContents(0);
@@ -155,6 +161,10 @@ QList<void *> VTreeWidget::searchItems(const QString &p_text,
     QList<void *> res;
     res.reserve(items.size());
     for (int i = 0; i < items.size(); ++i) {
+        if (items[i]->type() == ItemTypeSeparator) {
+            continue;
+        }
+
         res.append(items[i]);
     }
 

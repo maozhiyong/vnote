@@ -7,25 +7,10 @@
 
 #include "vsearchconfig.h"
 
-class VListWidgetDoubleRows;
+class VListWidget;
 class QListWidgetItem;
 class QLabel;
-
-class VListFolderPanel : public QWidget
-{
-    Q_OBJECT
-public:
-    explicit VListFolderPanel(QWidget *p_contentWidget,
-                              QWidget *p_parent = nullptr);
-
-    void setTitleLabel(const QString &p_title);
-
-    void clearTitle();
-
-private:
-    QLabel *m_titleLabel;
-};
-
+class VUETitleContentPanel;
 
 // Universal Entry to list contents of folder.
 class VListFolderUE : public IUniversalEntry
@@ -81,9 +66,9 @@ private:
     // Current folder path.
     QString m_currentFolderPath;
 
-    VListWidgetDoubleRows *m_listWidget;
+    VListWidget *m_listWidget;
 
-    VListFolderPanel *m_panel;
+    VUETitleContentPanel *m_panel;
 };
 
 #endif // VLISTFOLDERUE_H

@@ -1,4 +1,34 @@
 # Changes History
+## v1.17
+- Add **History** to browse history;
+- Add **Explorer** to browse external files;
+- Support view order in note list;
+- Support relative path for notebook;
+- UniversalEntry
+    - Fix input method issue on macOS;
+    - Add `j` for listing and searching History;
+- Support customized zoom delta of editor;
+- Add cache for in-place preview;
+- Better support for hiDPI;
+- Lazy initialization;
+- Support stay-on-top;
+
+## v1.16
+- Markdown-it: supports specifying image size, emoji, and YAML metadata;
+- Bug fixes;
+
+## v1.15
+- Support **PlantUML** and **Graphviz**;
+- **In-Place Preview** for MathJax, PlantUML, Graphviz, and Flowchart.js;
+- **Live Preview** for diagrams via `Ctrl+E I`;
+- Restore cursor position when recovering pages at startup;
+- UniversalEntry
+    - Ctrl+I to expand/collapse current item;
+    - Ctrl+L to go to current item's parent item;
+- Markdown-it: aware of YAML format metadata in notes;
+- Show hovered link in status line in read mode;
+- Export: support embedding images as data URI into HTML pages;
+
 ## v1.14
 - Support **Universal Entry** by `Ctrl+G`;
 - Single click a note in note list to open it in a new tab by default;

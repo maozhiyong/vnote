@@ -42,13 +42,14 @@ class VCart;
 class VSearcher;
 class QPrinter;
 class VUniversalEntry;
+class VHistoryList;
+class VExplorer;
 
 enum class PanelViewState
 {
     ExpandMode,
-    SinglePanel,
-    TwoPanels,
-    CompactMode,
+    HorizontalMode,
+    VerticalMode,
     Invalid
 };
 
@@ -65,6 +66,9 @@ public:
     // Returns true if the location succeeds.
     bool locateDirectory(VDirectory *p_directory);
 
+    // Returns true if the location succeeds.
+    bool locateNotebook(VNotebook *p_notebook);
+
     VFileList *getFileList() const;
 
     VEditArea *getEditArea() const;
@@ -77,16 +81,19 @@ public:
 
     VNotebookSelector *getNotebookSelector() const;
 
+    VHistoryList *getHistoryList() const;
+
     // View and edit the information of @p_file, which is an orphan file.
     void editOrphanFileInfo(VFile *p_file);
 
     // Open files @p_files as orphan files or internal note files.
     // If @p_forceOrphan is false, for each file, VNote will try to find out if
     // it is a note inside VNote. If yes, VNote will open it as internal file.
-    void openFiles(const QStringList &p_files,
-                   bool p_forceOrphan = false,
-                   OpenFileMode p_mode = OpenFileMode::Read,
-                   bool p_forceMode = false);
+    QVector<VFile *> openFiles(const QStringList &p_files,
+                               bool p_forceOrphan = false,
+                               OpenFileMode p_mode = OpenFileMode::Read,
+                               bool p_forceMode = false,
+                               bool p_oneByOne = false);
 
     // Try to open @p_filePath as internal note.
     bool tryOpenInternalFile(const QString &p_filePath);
@@ -111,6 +118,9 @@ public:
 
     VNotebook *getCurrentNotebook() const;
 
+    // Kick off timer to do things after start.
+    void kickOffStartUpTimer(const QStringList &p_files);
+
 signals:
     // Emit when editor related configurations were changed by user.
     void editorConfigUpdated();
@@ -133,9 +143,6 @@ private slots:
     void changeHighlightSelectedWord(bool p_checked);
     void changeHighlightSearchedWord(bool p_checked);
     void changeHighlightTrailingSapce(bool p_checked);
-    void onePanelView();
-    void twoPanelView();
-    void compactModeView();
     void curEditFileInfo();
     void deleteCurNote();
     void handleCurrentDirectoryChanged(const VDirectory *p_dir);
@@ -156,9 +163,6 @@ private slots:
 
     // Open export dialog.
     void handleExportAct();
-
-    // Set the panel view properly.
-    void enableCompactMode(bool p_enabled);
 
     // Handle Vim status updated.
     void handleVimStatusUpdated(const VVim *p_vim);
@@ -189,6 +193,8 @@ private slots:
     // Activate Universal Entry.
     void activateUniversalEntry();
 
+    void stayOnTop(bool p_enabled);
+
 protected:
     void closeEvent(QCloseEvent *event) Q_DECL_OVERRIDE;
 
@@ -198,7 +204,10 @@ protected:
 
 private:
     void setupUI();
-    QWidget *setupDirectoryPanel();
+
+    void setupNaviBox();
+
+    void setupNotebookPanel();
 
     void initToolBar();
 
@@ -270,7 +279,6 @@ private:
     void initTrayIcon();
 
     // Change the panel view according to @p_state.
-    // Will not change m_panelViewState.
     void changePanelView(PanelViewState p_state);
 
     // Whether heading sequence is applicable to current tab.
@@ -287,6 +295,10 @@ private:
 
     void initUniversalEntry();
 
+    void setMenuBarVisible(bool p_visible);
+
+    void showNotebookPanel();
+
     // Captain mode functions.
 
     // Popup the attachment list if it is enabled.
@@ -295,8 +307,6 @@ private:
     static bool locateCurrentFileByCaptain(void *p_target, void *p_data);
 
     static bool toggleExpandModeByCaptain(void *p_target, void *p_data);
-
-    static bool toggleOnePanelViewByCaptain(void *p_target, void *p_data);
 
     static bool discardAndReadByCaptain(void *p_target, void *p_data);
 
@@ -321,15 +331,18 @@ private:
     VCaptain *m_captain;
 
     VNotebookSelector *m_notebookSelector;
+
     VFileList *m_fileList;
-    VDirectoryTree *directoryTree;
+
+    VDirectoryTree *m_dirTree;
+
+    VToolBox *m_naviBox;
 
     // Splitter for directory | files | edit.
     QSplitter *m_mainSplitter;
 
-    // Splitter for directory | files.
-    // Move directory and file panel in one compact vertical split.
-    QSplitter *m_naviSplitter;
+    // Splitter for folders/notes.
+    QSplitter *m_nbSplitter;
 
     VEditArea *m_editArea;
 
@@ -358,9 +371,6 @@ private:
     VVimIndicator *m_vimIndicator;
 
     VTabIndicator *m_tabIndicator;
-
-    // SinglePanel, TwoPanels, CompactMode.
-    PanelViewState m_panelViewState;
 
     // Actions
     QAction *newRootDirAct;
@@ -403,9 +413,6 @@ private:
     // Act group for code block render styles.
     QActionGroup *m_codeBlockStyleActs;
 
-    // Act group for panel view actions.
-    QActionGroup *m_viewActGroup;
-
     // Menus
     QMenu *m_viewMenu;
 
@@ -442,6 +449,10 @@ private:
     QPrinter *m_printer;
 
     VUniversalEntry *m_ue;
+
+    VHistoryList *m_historyList;
+
+    VExplorer *m_explorer;
 
     // Interval of the shared memory timer in ms.
     static const int c_sharedMemTimerInterval;
@@ -482,9 +493,14 @@ inline VCart *VMainWindow::getCart() const
     return m_cart;
 }
 
+inline VHistoryList *VMainWindow::getHistoryList() const
+{
+    return m_historyList;
+}
+
 inline VDirectoryTree *VMainWindow::getDirectoryTree() const
 {
-    return directoryTree;
+    return m_dirTree;
 }
 
 inline VNotebookSelector *VMainWindow::getNotebookSelector() const

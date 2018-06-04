@@ -20,8 +20,6 @@
         <file>resources/icons/dir_info.svg</file>
         <file>resources/icons/notebook_info.svg</file>
         <file>resources/icons/expand.svg</file>
-        <file>resources/icons/two_panels.svg</file>
-        <file>resources/icons/one_panel.svg</file>
         <file>resources/icons/split_window.svg</file>
         <file>resources/icons/corner_menu.svg</file>
         <file>resources/icons/remove_split.svg</file>
@@ -92,7 +90,6 @@
         <file>resources/icons/delete_attachment.svg</file>
         <file>resources/icons/sort.svg</file>
         <file>resources/icons/create_subdir.svg</file>
-        <file>resources/icons/compact_mode.svg</file>
         <file>resources/icons/heading_sequence.svg</file>
         <file>resources/icons/link.svg</file>
         <file>resources/icons/code_block.svg</file>
@@ -213,5 +210,19 @@
         <file>resources/mathjax_preview.js</file>
         <file>resources/mathjax_preview_template.html</file>
         <file>utils/dom-to-image/dom-to-image.js</file>
+        <file>utils/markdown-it/markdown-it-front-matter.js</file>
+        <file>utils/markdown-it/markdown-it-imsize.min.js</file>
+        <file>utils/markdown-it/markdown-it-emoji.min.js</file>
+        <file>resources/icons/notebook.svg</file>
+        <file>resources/icons/history.svg</file>
+        <file>resources/icons/clear_history.svg</file>
+        <file>resources/icons/pin.svg</file>
+        <file>resources/icons/view.svg</file>
+        <file>resources/icons/explorer.svg</file>
+        <file>resources/icons/star.svg</file>
+        <file>resources/icons/open_location.svg</file>
+        <file>resources/icons/unstar.svg</file>
+        <file>resources/icons/explore_root.svg</file>
+        <file>resources/icons/stay_on_top.svg</file>
     </qresource>
 </RCC>

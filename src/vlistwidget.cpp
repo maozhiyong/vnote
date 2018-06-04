@@ -8,6 +8,9 @@
 #include "utils/vutils.h"
 #include "utils/vimnavigationforwidget.h"
 #include "vstyleditemdelegate.h"
+#include "vpalette.h"
+
+extern VPalette *g_palette;
 
 VListWidget::VListWidget(QWidget *p_parent)
     : QListWidget(p_parent),
@@ -20,7 +23,7 @@ VListWidget::VListWidget(QWidget *p_parent)
 
     m_searchInput->hide();
 
-    m_delegate = new VStyledItemDelegate(this);
+    m_delegate = new VStyledItemDelegate(this, NULL);
     setItemDelegate(m_delegate);
 }
 
@@ -82,8 +85,16 @@ void VListWidget::resizeEvent(QResizeEvent *p_event)
 
 void VListWidget::handleSearchModeTriggered(bool p_inSearchMode, bool p_focus)
 {
-    setSearchInputVisible(p_inSearchMode);
-    if (!p_inSearchMode) {
+    if (p_inSearchMode) {
+        setSearchInputVisible(p_inSearchMode);
+    } else {
+        // Hiding search input will make QWebEngine get focus which will consume
+        // the Esc key sequence by mistake.
+        if (p_focus) {
+            setFocus();
+        }
+
+        setSearchInputVisible(p_inSearchMode);
         clearItemsHighlight();
     }
 
@@ -100,6 +111,10 @@ QList<void *> VListWidget::searchItems(const QString &p_text,
     QList<void *> res;
     res.reserve(items.size());
     for (int i = 0; i < items.size(); ++i) {
+        if (items[i]->type() == ItemTypeSeparator) {
+            continue;
+        }
+
         res.append(items[i]);
     }
 
@@ -204,3 +219,22 @@ QSize VListWidget::sizeHint() const
     }
 }
 
+QListWidgetItem *VListWidget::createSeparatorItem(const QString &p_text)
+{
+    QListWidgetItem *item = new QListWidgetItem(p_text, NULL, ItemTypeSeparator);
+    item->setFlags(Qt::NoItemFlags);
+    return item;
+}
+
+bool VListWidget::isSeparatorItem(const QListWidgetItem *p_item)
+{
+    return p_item->type() == ItemTypeSeparator;
+}
+
+void VListWidget::moveItem(int p_srcRow, int p_destRow)
+{
+    QListWidgetItem *it = takeItem(p_srcRow);
+    if (it) {
+        insertItem(p_destRow, it);
+    }
+}

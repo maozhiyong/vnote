@@ -93,6 +93,9 @@ private slots:
     // Sort sub-folders of current item's folder.
     void sortItems();
 
+    // Pin selected directory to History.
+    void pinDirectoryToHistory();
+
 protected:
     void mousePressEvent(QMouseEvent *event) Q_DECL_OVERRIDE;
 
@@ -109,8 +112,6 @@ private:
     void fillTreeItem(QTreeWidgetItem *p_item, VDirectory *p_directory);
 
     void initShortcuts();
-
-    void initActions();
 
     // Update @p_item's direct children only: deleted, added, renamed.
     void updateItemDirectChildren(QTreeWidgetItem *p_item);
@@ -162,24 +163,6 @@ private:
 
     // Magic number for clipboard operations.
     int m_magicForClipboard;
-
-    // Actions
-    QAction *m_newNoteAct;
-
-    QAction *newRootDirAct;
-
-    QAction *newSubDirAct;
-
-    QAction *deleteDirAct;
-    QAction *dirInfoAct;
-    QAction *copyAct;
-    QAction *cutAct;
-    QAction *pasteAct;
-    QAction *m_openLocationAct;
-    QAction *m_sortAct;
-
-    // Reload content from disk.
-    QAction *m_reloadAct;
 
     static const QString c_infoShortcutSequence;
     static const QString c_copyShortcutSequence;

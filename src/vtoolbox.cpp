@@ -40,7 +40,10 @@ void VToolBox::setupUI()
     setLayout(mainLayout);
 }
 
-int VToolBox::addItem(QWidget *p_widget, const QString &p_iconFile, const QString &p_text)
+int VToolBox::addItem(QWidget *p_widget,
+                      const QString &p_iconFile,
+                      const QString &p_text,
+                      QWidget *p_focusWidget)
 {
     int idx = m_items.size();
 
@@ -49,6 +52,7 @@ int VToolBox::addItem(QWidget *p_widget, const QString &p_iconFile, const QStrin
     QPushButton *btn = new QPushButton(icon, "");
     btn->setToolTip(p_text);
     btn->setProperty("FlatBtn", true);
+    btn->setProperty("ToolBoxTitleBtn", true);
     connect(btn, &QPushButton::clicked,
             this, [this]() {
                 QObject *btn = sender();
@@ -66,6 +70,7 @@ int VToolBox::addItem(QWidget *p_widget, const QString &p_iconFile, const QStrin
     m_widgetLayout->insertWidget(idx, p_widget);
 
     m_items.push_back(ItemInfo(p_widget,
+                               p_focusWidget,
                                p_text,
                                btn,
                                icon,
@@ -78,10 +83,14 @@ int VToolBox::addItem(QWidget *p_widget, const QString &p_iconFile, const QStrin
     return idx;
 }
 
-void VToolBox::setCurrentIndex(int p_idx)
+void VToolBox::setCurrentIndex(int p_idx, bool p_focus)
 {
     if (p_idx < 0 || p_idx >= m_items.size()) {
-        m_currentIndex = -1;
+        if (m_items.isEmpty()) {
+            m_currentIndex = -1;
+        } else {
+            m_currentIndex = 0;
+        }
     } else {
         m_currentIndex = p_idx;
     }
@@ -91,12 +100,16 @@ void VToolBox::setCurrentIndex(int p_idx)
     m_widgetLayout->setCurrentIndex(m_currentIndex);
 
     QWidget *widget = m_widgetLayout->widget(m_currentIndex);
-    if (widget) {
-        widget->setFocus();
+    if (widget && p_focus) {
+        if (m_items[m_currentIndex].m_focusWidget) {
+            m_items[m_currentIndex].m_focusWidget->setFocus();
+        } else {
+            widget->setFocus();
+        }
     }
 }
 
-void VToolBox::setCurrentWidget(QWidget *p_widget)
+void VToolBox::setCurrentWidget(QWidget *p_widget, bool p_focus)
 {
     int idx = -1;
     for (int i = 0; i < m_items.size(); ++i) {
@@ -106,7 +119,7 @@ void VToolBox::setCurrentWidget(QWidget *p_widget)
         }
     }
 
-    setCurrentIndex(idx);
+    setCurrentIndex(idx, p_focus);
 }
 
 void VToolBox::setCurrentButtonIndex(int p_idx)

@@ -17,7 +17,7 @@ const QString VConfigManager::orgName = QString("vnote");
 
 const QString VConfigManager::appName = QString("vnote");
 
-const QString VConfigManager::c_version = QString("1.14");
+const QString VConfigManager::c_version = QString("1.17");
 
 const QString VConfigManager::c_obsoleteDirConfigFile = QString(".vnote.json");
 
@@ -51,6 +51,8 @@ const QString VConfigManager::c_exportFolderName = QString("vnote_exports");
 
 VConfigManager::VConfigManager(QObject *p_parent)
     : QObject(p_parent),
+      m_noteListViewOrder(-1),
+      m_explorerCurrentIndex(-1),
       m_hasReset(false),
       userSettings(NULL),
       defaultSettings(NULL),
@@ -127,6 +129,8 @@ void VConfigManager::initialize()
         m_webZoomFactor = VUtils::calculateScaleFactor();
         qDebug() << "set WebZoomFactor to" << m_webZoomFactor;
     }
+
+    m_editorZoomDelta = getConfigFromSettings("global", "editor_zoom_delta").toInt();
 
     m_enableCodeBlockHighlight = getConfigFromSettings("global",
                                                        "enable_code_block_highlight").toBool();
@@ -238,9 +242,6 @@ void VConfigManager::initialize()
     m_doubleClickCloseTab = getConfigFromSettings("global",
                                                   "double_click_close_tab").toBool();
 
-    m_enableCompactMode = getConfigFromSettings("global",
-                                                "enable_compact_mode").toBool();
-
     int tmpStartupPageMode = getConfigFromSettings("global",
                                                    "startup_page_type").toInt();
     if (tmpStartupPageMode < (int)StartupPageType::Invalid
@@ -289,8 +290,18 @@ void VConfigManager::initialize()
     m_plantUMLServer = getConfigFromSettings("web", "plantuml_server").toString();
     m_plantUMLJar = getConfigFromSettings("web", "plantuml_jar").toString();
 
+    QString plantUMLArgs = getConfigFromSettings("web", "plantuml_args").toString();
+    m_plantUMLArgs = VUtils::parseCombinedArgString(plantUMLArgs);
+
+    m_plantUMLCmd = getConfigFromSettings("web", "plantuml_cmd").toString();
+
     m_enableGraphviz = getConfigFromSettings("global", "enable_graphviz").toBool();
     m_graphvizDot = getConfigFromSettings("web", "graphviz_dot").toString();
+
+    m_historySize = getConfigFromSettings("global", "history_size").toInt();
+    if (m_historySize < 0) {
+        m_historySize = 0;
+    }
 }
 
 void VConfigManager::initSettings()
@@ -332,18 +343,6 @@ void VConfigManager::initSettings()
 void VConfigManager::initFromSessionSettings()
 {
     curNotebookIndex = getConfigFromSessionSettings("global", "current_notebook").toInt();
-
-    m_mainWindowGeometry = getConfigFromSessionSettings("geometry",
-                                                        "main_window_geometry").toByteArray();
-
-    m_mainWindowState = getConfigFromSessionSettings("geometry",
-                                                     "main_window_state").toByteArray();
-
-    m_mainSplitterState = getConfigFromSessionSettings("geometry",
-                                                       "main_splitter_state").toByteArray();
-
-    m_naviSplitterState = getConfigFromSessionSettings("geometry",
-                                                       "navi_splitter_state").toByteArray();
 }
 
 void VConfigManager::readCustomColors()
@@ -401,7 +400,7 @@ void VConfigManager::writeNotebookToSettings(QSettings *p_settings,
         p_settings->setArrayIndex(i);
         const VNotebook &notebook = *p_notebooks[i];
         p_settings->setValue("name", notebook.getName());
-        p_settings->setValue("path", notebook.getPath());
+        p_settings->setValue("path", notebook.getPathInConfig());
     }
 
     p_settings->endArray();
@@ -1220,9 +1219,81 @@ void VConfigManager::setLastOpenedFiles(const QVector<VFileSessionInfo> &p_files
     }
 
     m_sessionSettings->endArray();
-    qDebug() << "write" << p_files.size()
-             << "items in [last_opened_files] section";
+}
 
+void VConfigManager::getHistory(QLinkedList<VHistoryEntry> &p_history) const
+{
+    p_history.clear();
+
+    int size = m_sessionSettings->beginReadArray("history");
+    for (int i = 0; i < size; ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        p_history.append(VHistoryEntry::fromSettings(m_sessionSettings));
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::setHistory(const QLinkedList<VHistoryEntry> &p_history)
+{
+    if (m_hasReset) {
+        return;
+    }
+
+    const QString section("history");
+
+    // Clear it first
+    m_sessionSettings->beginGroup(section);
+    m_sessionSettings->remove("");
+    m_sessionSettings->endGroup();
+
+    m_sessionSettings->beginWriteArray(section);
+    int i = 0;
+    for (auto it = p_history.begin(); it != p_history.end(); ++it, ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        it->toSettings(m_sessionSettings);
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::getExplorerEntries(QVector<VExplorerEntry> &p_entries) const
+{
+    p_entries.clear();
+
+    int size = m_sessionSettings->beginReadArray("explorer_starred");
+    for (int i = 0; i < size; ++i) {
+        m_sessionSettings->setArrayIndex(i);
+        p_entries.append(VExplorerEntry::fromSettings(m_sessionSettings));
+    }
+
+    m_sessionSettings->endArray();
+}
+
+void VConfigManager::setExplorerEntries(const QVector<VExplorerEntry> &p_entries)
+{
+    if (m_hasReset) {
+        return;
+    }
+
+    const QString section("explorer_starred");
+
+    // Clear it first
+    m_sessionSettings->beginGroup(section);
+    m_sessionSettings->remove("");
+    m_sessionSettings->endGroup();
+
+    m_sessionSettings->beginWriteArray(section);
+    int idx = 0;
+    for (auto const & entry : p_entries) {
+        if (entry.m_isStarred) {
+            m_sessionSettings->setArrayIndex(idx);
+            entry.toSettings(m_sessionSettings);
+            ++idx;
+        }
+    }
+
+    m_sessionSettings->endArray();
 }
 
 QVector<VMagicWord> VConfigManager::getCustomMagicWords()
@@ -1473,7 +1544,6 @@ void VConfigManager::resetLayoutConfigurations()
     resetDefaultConfig("global", "tools_dock_checked");
     resetDefaultConfig("global", "search_dock_checked");
     resetDefaultConfig("global", "menu_bar_checked");
-    resetDefaultConfig("global", "enable_compact_mode");
 
     clearGroupOfSettings(m_sessionSettings, "geometry");
 

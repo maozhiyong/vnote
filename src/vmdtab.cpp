@@ -234,8 +234,10 @@ void VMdTab::showFileEditMode()
     // If editor is not init, we need to wait for it to init headers.
     // Generally, beginEdit() will generate the headers. Wait is needed when
     // highlight completion is going to re-generate the headers.
-    int nrRetry = 5;
-    while (header.m_index > -1 && m_outline.isEmpty() && nrRetry-- > 0) {
+    int nrRetry = 10;
+    while (header.m_index > -1
+           && nrRetry-- > 0
+           && (m_outline.isEmpty() || m_outline.getType() != VTableOfContentType::BlockNumber)) {
         qDebug() << "wait another 100 ms for editor's headers ready";
         VUtils::sleepWait(100);
     }
@@ -409,6 +411,8 @@ void VMdTab::setupMarkdownViewer()
     m_webViewer->setZoomFactor(g_config->getWebZoomFactor());
     connect(page->profile(), &QWebEngineProfile::downloadRequested,
             this, &VMdTab::handleDownloadRequested);
+    connect(page, &QWebEnginePage::linkHovered,
+            this, &VMdTab::statusMessage);
 
     // Avoid white flash before loading content.
     page->setBackgroundColor(Qt::transparent);
@@ -471,6 +475,13 @@ void VMdTab::setupMarkdownEditor()
     m_editor = new VMdEditor(m_file, m_document, m_mdConType, this);
     m_editor->setProperty("MainEditor", true);
     m_editor->setEditTab(this);
+    int delta = g_config->getEditorZoomDelta();
+    if (delta > 0) {
+        m_editor->zoomInW(delta);
+    } else if (delta < 0) {
+        m_editor->zoomOutW(-delta);
+    }
+
     connect(m_editor, &VMdEditor::headersChanged,
             this, &VMdTab::updateOutlineFromHeaders);
     connect(m_editor, SIGNAL(currentHeaderChanged(int)),
@@ -705,9 +716,16 @@ void VMdTab::clearSearchedWordHighlight()
     }
 }
 
-void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift)
+void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift, bool p_meta)
 {
     V_ASSERT(m_webViewer);
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    bool macCtrl = p_meta;
+#else
+    Q_UNUSED(p_meta);
+    bool macCtrl = false;
+#endif
 
     switch (p_key) {
     // Esc
@@ -717,7 +735,7 @@ void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift)
 
     // Dash
     case 189:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Zoom out.
             zoomWebPage(false);
         }
@@ -726,7 +744,7 @@ void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift)
 
     // Equal
     case 187:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Zoom in.
             zoomWebPage(true);
         }
@@ -735,7 +753,7 @@ void VMdTab::handleWebKeyPressed(int p_key, bool p_ctrl, bool p_shift)
 
     // 0
     case 48:
-        if (p_ctrl) {
+        if (p_ctrl || macCtrl) {
             // Recover zoom.
             m_webViewer->setZoomFactor(1);
         }
@@ -874,9 +892,21 @@ bool VMdTab::restoreFromTabInfo(const VEditTabInfo &p_info)
         return false;
     }
 
+    bool ret = false;
+    // Restore cursor position.
+    if (m_isEditMode
+        && m_editor
+        && p_info.m_cursorBlockNumber > -1
+        && p_info.m_cursorPositionInBlock > -1) {
+        ret = m_editor->setCursorPosition(p_info.m_cursorBlockNumber, p_info.m_cursorPositionInBlock);
+    }
+
     // Restore header.
-    VHeaderPointer header(m_file, p_info.m_headerIndex);
-    bool ret = scrollToHeaderInternal(header);
+    if (!ret) {
+        VHeaderPointer header(m_file, p_info.m_headerIndex);
+        ret = scrollToHeaderInternal(header);
+    }
+
     return ret;
 }
 
@@ -895,6 +925,9 @@ void VMdTab::enableHeadingSequence(bool p_enabled)
     if (m_editor) {
         VEditConfig &config = m_editor->getConfig();
         config.m_enableHeadingSequence = m_enableHeadingSequence;
+        if (isEditMode()) {
+            m_editor->updateHeaderSequenceByConfigChange();
+        }
     }
 }
 
@@ -1367,12 +1400,19 @@ void VMdTab::setCurrentMode(Mode p_mode)
         m_livePreviewHelper->setLivePreviewEnabled(false);
     }
 
+    m_mode = p_mode;
+
     switch (p_mode) {
     case Mode::Read:
-        m_webViewer->show();
         if (m_editor) {
             m_editor->hide();
         }
+
+        m_webViewer->show();
+
+        // Fix the bug introduced by 051088be31dbffa3c04e2d382af15beec40d5fdb
+        // which replace QStackedLayout with QSplitter.
+        QCoreApplication::sendPostedEvents();
 
         if (m_readWebViewState.isNull()) {
             m_readWebViewState.reset(new WebViewState());
@@ -1385,14 +1425,20 @@ void VMdTab::setCurrentMode(Mode p_mode)
         break;
 
     case Mode::Edit:
-        m_editor->show();
         m_webViewer->hide();
+        m_editor->show();
+
+        QCoreApplication::sendPostedEvents();
+
         break;
 
     case Mode::EditPreview:
         Q_ASSERT(m_editor);
-        m_editor->show();
         m_webViewer->show();
+        m_editor->show();
+
+        QCoreApplication::sendPostedEvents();
+
         if (m_previewWebViewState.isNull()) {
             m_previewWebViewState.reset(new WebViewState());
             m_previewWebViewState->m_zoomFactor = factor;
@@ -1423,8 +1469,6 @@ void VMdTab::setCurrentMode(Mode p_mode)
     default:
         break;
     }
-
-    m_mode = p_mode;
 
     focusChild();
 }

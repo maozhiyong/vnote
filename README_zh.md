@@ -46,13 +46,15 @@ sudo zypper in vnote
 由于 Leap 42 及以下版本的 Qt 版本过低，我们无法在 OBS 上进行打包。请使用 AppImage 或自行构建。
 
 ### Arch Linux
-Arch Linux可以通过AUR中的 [vnote-git](https://aur.archlinux.org/packages/vnote-git/) 进行安装：
+Arch Linux可以通过AUR中的 [vnote](https://aur.archlinux.org/packages/vnote/) 进行安装：
 
 ```shell
-git clone https://aur.archlinux.org/vnote-git.git
-cd vnote-git
+git clone https://aur.archlinux.org/vnote.git
+cd vnote
 makepkg -sic
 ```
+
+AUR也提供一个和最新master分支同步的开发版本 [vnote-git](https://aur.archlinux.org/packages/vnote-git/) 。
 
 ## MacOS
 [![Build Status](https://travis-ci.org/tamlok/vnote.svg?branch=master)](https://travis-ci.org/tamlok/vnote)
@@ -74,7 +76,7 @@ VNote不是一个简单的Markdown编辑器。通过提供笔记管理功能，V
 
 基于Qt框架，VNote能够在主流操作系统上运行，包括 **Linux**, **Windows** 以及 **macOS** 。
 
-![VNote Main Interface](screenshots/_vnotemaini_1521763751_1643978501.png)
+![VNote Main Interface](screenshots/_vnotemaini_1525154456_1561295841.png)
 
 # 支持
 - [Github issues](https://github.com/tamlok/vnote/issues)；
@@ -87,16 +89,18 @@ VNote不是一个简单的Markdown编辑器。通过提供笔记管理功能，V
 - **通用入口**，通过按键操控一切；
 - 直接从剪切板插入图片；
 - 编辑和阅读模式下代码块的语法高亮；
+- 强大的**原地预览**，包括图片、图表和公式；
+- 针对图表的两边实时预览；
 - 编辑和阅读模式下的大纲；
 - 自定义编辑和阅读模式的样式；
 - Vim模式以及一系列强大的快捷键；
 - 无限层级的文件夹；
 - 多个标签页和窗口分割；
-- [Mermaid](http://knsv.github.io/mermaid/), [Flowchart.js](http://flowchart.js.org/) 和 [MathJax](https://www.mathjax.org/)；
+- [Mermaid](http://knsv.github.io/mermaid/)、 [Flowchart.js](http://flowchart.js.org/)、 [MathJax](https://www.mathjax.org/)、 [PlantUML](http://plantuml.com/) 和 [Graphviz](http://www.graphviz.org/)；
 - 支持高分辨率；
 - 笔记附件；
 - 主题以及深色模式；
-- 丰富、可扩展的导出，包括HTML，PDF，和PDF（多合一）；
+- 丰富、可扩展的导出，包括HTML、PDF、PDF（多合一）和图片；
 
 # 捐赠
 您可以通过很多途径帮助VNote的开发。
@@ -108,6 +112,8 @@ VNote不是一个简单的Markdown编辑器。通过提供笔记管理功能，V
     - PayPal: [PayPal.Me/vnotemd](https://www.paypal.me/vnotemd)
     - 支付宝: `tamlokveer@gmail.com`  
     ![Alipay](screenshots/alipay.png)
+    - 微信  
+    ![WeChat Pay](screenshots/wechat_pay.png)
 
 非常感谢这些对VNote的 [捐赠者](https://github.com/tamlok/vnote/wiki/Donate-List) !
 
@@ -148,12 +154,10 @@ VNote还支持Markdown编辑模式中代码块的语法高亮。目前的Markdow
 
 ![Syntax Highlight](screenshots/_1513485266_1616037517.png)
 
-## 实时图片预览
-VNote支持在编辑时原地预览图片链接。这样一来，您就能尽可能地留在编辑模式，避免频繁切换。
+## 原地预览
+VNote支持在编辑时原地预览图片、图表和公式。
 
-如果想要拷贝图片，可以选取该图片，然后复制。
-
-![Live Image Preview](screenshots/_1513485934_140085443.png)
+![In-Place Preview](screenshots/_inplacepre_1525155248_405615820.png)
 
 ## 良好的图片体验
 编辑时，支持像其他富文本编辑器一样直接粘贴插入图片，VNote会帮您管理所插入的图片。VNote将这些图片保存在和笔记同一目录下的一个指定目录中。插入图片时，VNote会弹出一个窗口预览即将要插入的图片。另外，当您移除笔记中的图片链接时，VNote会自动删除对应的图片文件。
@@ -190,10 +194,18 @@ VNote中，几乎一切都是可以定制的，例如背景颜色、字体以及
 - [markdown-it 8.3.1](https://github.com/markdown-it/markdown-it) (MIT License)
 - [markdown-it-headinganchor 1.3.0](https://github.com/adam-p/markdown-it-headinganchor) (MIT License)
 - [markdown-it-task-lists 1.4.0](https://github.com/revin/markdown-it-task-lists) (ISC License)
+- [markdown-it-footnote](https://github.com/markdown-it/markdown-it-footnote) (MIT License)
+- [markdown-it-sub](https://github.com/markdown-it/markdown-it-sub) (MIT License)
+- [markdown-it-sup](https://github.com/markdown-it/markdown-it-sup) (MIT License)
+- [markdown-it-front-matter](https://github.com/craigdmckenna/markdown-it-front-matter) (MIT License)
+- [markdown-it-imsize](https://github.com/tatsy/markdown-it-imsize) (Unknown) (Thanks @Kinka for help)
+- [markdown-it-emoji](https://github.com/markdown-it/markdown-it-emoji) (MIT License)
 - [mermaid 7.0.0](https://github.com/knsv/mermaid) (MIT License)
 - [MathJax](https://www.mathjax.org/) (Apache-2.0)
 - [showdown](https://github.com/showdownjs/showdown) (Unknown)
 - [flowchart.js](https://github.com/adrai/flowchart.js) (MIT License)
+- [PlantUML](http://plantuml.com/) (MIT License)
+- [dom-to-image](https://github.com/tsayen/dom-to-image) (MIT License)
 
 # 代码许可
 VNote使用[MIT许可](http://opensource.org/licenses/MIT)。

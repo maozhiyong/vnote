@@ -4,6 +4,9 @@
 #include <QCoreApplication>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QMimeData>
+#include <QApplication>
+#include <QClipboard>
 
 #ifndef QT_NO_PRINTER
 #include <QPrinter>
@@ -11,6 +14,7 @@
 #endif
 
 #include "utils/vutils.h"
+#include "utils/vclipboardutils.h"
 #include "vlineedit.h"
 #include "vnotebook.h"
 #include "vfile.h"
@@ -127,7 +131,11 @@ void VExportDialog::setupUI()
     // Ok is the default button.
     m_btnBox = new QDialogButtonBox(QDialogButtonBox::Close);
     m_exportBtn = m_btnBox->addButton(tr("Export"), QDialogButtonBox::ActionRole);
-    m_openBtn = m_btnBox->addButton(tr("Open Output Directory"), QDialogButtonBox::ActionRole);
+    m_openBtn = m_btnBox->addButton(tr("Open Directory"), QDialogButtonBox::ActionRole);
+    m_openBtn->setToolTip(tr("Open output directory"));
+    m_copyBtn = m_btnBox->addButton(tr("Copy Content"), QDialogButtonBox::ActionRole);
+    m_copyBtn->setToolTip(tr("Copy the content of the exported file"));
+    m_copyBtn->setEnabled(false);
     connect(m_btnBox, &QDialogButtonBox::rejected,
             this, [this]() {
                 if (m_inExport) {
@@ -148,6 +156,28 @@ void VExportDialog::setupUI()
             this, [this]() {
                 QUrl url = QUrl::fromLocalFile(getOutputDirectory());
                 QDesktopServices::openUrl(url);
+            });
+
+    connect(m_copyBtn, &QPushButton::clicked,
+            this, [this]() {
+                if (m_exportedFile.isEmpty()) {
+                    return;
+                }
+
+                bool ret = false;
+                QString content = VUtils::readFileFromDisk(m_exportedFile);
+                if (!content.isNull()) {
+                    QMimeData *data = new QMimeData();
+                    data->setText(content);
+                    VClipboardUtils::setMimeDataToClipboard(QApplication::clipboard(), data, QClipboard::Clipboard);
+                    ret = true;
+                }
+
+                if (ret) {
+                    appendLogLine(tr("Copied content of file %1").arg(m_exportedFile));
+                } else {
+                    appendLogLine(tr("Fail to copy content of file %1").arg(m_exportedFile));
+                }
             });
 
     // Progress bar.
@@ -313,11 +343,23 @@ QWidget *VExportDialog::setupHTMLAdvancedSettings()
     m_embedStyleCB = new QCheckBox(tr("Embed CSS styles"), this);
     m_embedStyleCB->setToolTip(tr("Embed CSS styles in HTML file"));
 
+    // Embed images as data URI.
+    m_embedImagesCB = new QCheckBox(tr("Embed images"), this);
+    m_embedImagesCB->setToolTip(tr("Embed images as data URI"));
+
     // Complete HTML.
     m_completeHTMLCB = new QCheckBox(tr("Complete page"), this);
     m_completeHTMLCB->setToolTip(tr("Export the whole web page along with pictures "
                                     "which may not keep the HTML link structure of "
                                     "the original page"));
+    connect(m_completeHTMLCB, &QCheckBox::stateChanged,
+            this, [this](int p_state) {
+                bool checked = p_state == Qt::Checked;
+                m_embedImagesCB->setEnabled(checked);
+                if (!checked) {
+                    m_embedImagesCB->setChecked(false);
+                }
+            });
 
     // Mime HTML.
     m_mimeHTMLCB = new QCheckBox(tr("MIME HTML"), this);
@@ -332,6 +374,7 @@ QWidget *VExportDialog::setupHTMLAdvancedSettings()
     QFormLayout *advLayout = new QFormLayout();
     advLayout->addRow(m_embedStyleCB);
     advLayout->addRow(m_completeHTMLCB);
+    advLayout->addRow(m_embedImagesCB);
     advLayout->addRow(m_mimeHTMLCB);
 
     advLayout->setContentsMargins(0, 0, 0, 0);
@@ -435,6 +478,8 @@ void VExportDialog::initUIFields(MarkdownConverterType p_renderer)
 
     m_completeHTMLCB->setChecked(s_opt.m_htmlOpt.m_completeHTML);
 
+    m_embedImagesCB->setChecked(s_opt.m_htmlOpt.m_embedImages);
+
     m_mimeHTMLCB->setChecked(s_opt.m_htmlOpt.m_mimeHTML);
 
     m_tableOfContentsCB->setChecked(s_opt.m_pdfOpt.m_enableTableOfContents);
@@ -509,18 +554,20 @@ void VExportDialog::startExport()
     m_askedToStop = false;
     m_exporter->setAskedToStop(false);
     m_inExport = true;
+    m_exportedFile.clear();
+    m_copyBtn->setEnabled(false);
 
     QString outputFolder = QDir::cleanPath(QDir(getOutputDirectory()).absolutePath());
 
     QString renderStyle = m_renderStyleCB->currentData().toString();
-    QString cssUrl = g_config->getCssStyleUrl(renderStyle);
+    QString renderCodeBlockStyle = m_renderCodeBlockStyleCB->currentData().toString();
 
     s_opt = ExportOption(currentSource(),
                          currentFormat(),
                          (MarkdownConverterType)m_rendererCB->currentData().toInt(),
                          m_renderBgCB->currentData().toString(),
                          renderStyle,
-                         m_renderCodeBlockStyleCB->currentData().toString(),
+                         renderCodeBlockStyle,
                          m_subfolderCB->isChecked(),
                          ExportPDFOption(&m_pageLayout,
                                          m_wkhtmltopdfCB->isChecked(),
@@ -534,12 +581,14 @@ void VExportDialog::startExport()
                                          m_wkExtraArgsEdit->text()),
                          ExportHTMLOption(m_embedStyleCB->isChecked(),
                                           m_completeHTMLCB->isChecked(),
+                                          m_embedImagesCB->isChecked(),
                                           m_mimeHTMLCB->isChecked()),
                          ExportCustomOption((ExportCustomOption::SourceFormat)
                                             m_customSrcFormatCB->currentData().toInt(),
                                             m_customSuffixEdit->text(),
                                             m_customCmdEdit->toPlainText(),
-                                            cssUrl,
+                                            g_config->getCssStyleUrl(renderStyle),
+                                            g_config->getCodeBlockCssStyleUrl(renderCodeBlockStyle),
                                             m_customAllInOneCB->isChecked(),
                                             m_customFolderSepEdit->text(),
                                             m_customTargetFileNameEdit->text()));
@@ -638,8 +687,16 @@ void VExportDialog::startExport()
     } else {
         switch (s_opt.m_source) {
         case ExportSource::CurrentNote:
-            ret = doExport(m_file, s_opt, outputFolder, &msg);
+        {
+            QStringList files;
+            ret = doExport(m_file, s_opt, outputFolder, &msg, &files);
+            if (ret == 1 && s_opt.m_format == ExportFormat::HTML) {
+                Q_ASSERT(files.size() == 1);
+                m_exportedFile = files.first();
+            }
+
             break;
+        }
 
         case ExportSource::CurrentFolder:
             ret = doExport(m_directory, s_opt, outputFolder, &msg);
@@ -681,6 +738,8 @@ exit:
     m_inExport = false;
     m_exportBtn->setEnabled(true);
     m_proBar->hide();
+
+    m_copyBtn->setEnabled(!m_exportedFile.isEmpty());
 }
 
 QString VExportDialog::getOutputDirectory() const
@@ -1288,7 +1347,8 @@ QWidget *VExportDialog::setupCustomAdvancedSettings()
     QLabel *tipsLabel = new QLabel(tr("<span><span style=\"font-weight:bold;\">%0</span> for the input file; "
                                       "<span style=\"font-weight:bold;\">%1</span> for the output file; "
                                       "<span style=\"font-weight:bold;\">%2</span> for the rendering CSS style file; "
-                                      "<span style=\"font-weight:bold;\">%3</span> for the input file directory.</span>"),
+                                      "<span style=\"font-weight:bold;\">%3</span> for the input file directory; "
+                                      "<span style=\"font-weight:bold;\">%4</span> for the rendering code block CSS style file.</span>"),
                                    this);
     tipsLabel->setWordWrap(true);
 
@@ -1320,7 +1380,7 @@ QWidget *VExportDialog::setupCustomAdvancedSettings()
     // Cmd edit.
     m_customCmdEdit = new QPlainTextEdit(this);
     m_customCmdEdit->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Minimum);
-    QString cmdExamp("pandoc --resource-path=.:\"%3\" --css=\"%2\" -s -o \"%1\" \"%0\"");
+    QString cmdExamp("pandoc --resource-path=.:\"%3\" --css=\"%2\" --css=\"%4\" -s -o \"%1\" \"%0\"");
     m_customCmdEdit->setPlaceholderText(cmdExamp);
     m_customCmdEdit->setToolTip(tr("Custom command to be executed"));
     m_customCmdEdit->setProperty("LineEdit", true);

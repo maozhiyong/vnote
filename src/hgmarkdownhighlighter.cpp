@@ -36,6 +36,7 @@ HGMarkdownHighlighter::HGMarkdownHighlighter(const QVector<HighlightingStyle> &s
       m_blockHLResultReady(false),
       waitInterval(waitInterval),
       m_enableMathjax(false),
+      m_signalOut(false),
       content(NULL),
       capacity(0),
       result(NULL)
@@ -82,15 +83,12 @@ HGMarkdownHighlighter::HGMarkdownHighlighter(const QVector<HighlightingStyle> &s
                 startParseAndHighlight(false);
             });
 
-    static const int completeWaitTime = 500;
+    const int completeWaitTime = 400;
     m_completeTimer = new QTimer(this);
     m_completeTimer->setSingleShot(true);
     m_completeTimer->setInterval(completeWaitTime);
     connect(m_completeTimer, &QTimer::timeout,
-            this, [this]() {
-                updateMathjaxBlocks();
-                emit highlightCompleted();
-            });
+            this, &HGMarkdownHighlighter::completeHighlight);
 
     connect(document, &QTextDocument::contentsChange,
             this, &HGMarkdownHighlighter::handleContentChange);
@@ -185,8 +183,13 @@ void HGMarkdownHighlighter::highlightBlock(const QString &text)
         if (isVerbatimBlock(curBlock)) {
             setCurrentBlockState(HighlightBlockState::Verbatim);
             goto exit;
-        } else if (m_enableMathjax) {
-            highlightMathJax(text);
+        }
+
+        highlightHeaderFast(blockNum, text);
+
+        if (m_enableMathjax
+            && currentBlockState() == HighlightBlockState::Normal) {
+            highlightMathJax(curBlock, text);
         }
     }
 
@@ -194,8 +197,6 @@ void HGMarkdownHighlighter::highlightBlock(const QString &text)
     // Links in the URL should be encoded to %20. We just let it be here and won't
     // fix this.
     // highlightLinkWithSpacesInURL(text);
-
-    highlightHeaderFast(blockNum, text);
 
     if (currentBlockState() != HighlightBlockState::CodeBlock) {
         goto exit;
@@ -270,21 +271,11 @@ void HGMarkdownHighlighter::initBlockHighlightFromResult(int nrBlocks)
         const HighlightingStyle &style = highlightingStyles[i];
         pmh_element *elem_cursor = result[style.type];
 
-        // pmh_H1 to pmh_H6 is continuous.
-        bool isHeader = style.type >= pmh_H1 && style.type <= pmh_H6;
-
         while (elem_cursor != NULL)
         {
             // elem_cursor->pos and elem_cursor->end is the start
             // and end position of the element in document.
             if (elem_cursor->end <= elem_cursor->pos) {
-                elem_cursor = elem_cursor->next;
-                continue;
-            }
-
-            // Check header. Skip those headers with no spaces after #s.
-            if (isHeader
-                && !isValidHeader(elem_cursor->pos, elem_cursor->end)) {
                 elem_cursor = elem_cursor->next;
                 continue;
             }
@@ -304,7 +295,6 @@ void HGMarkdownHighlighter::initBlockHighlightFromResult(int nrBlocks)
 
 void HGMarkdownHighlighter::initHtmlCommentRegionsFromResult()
 {
-    // From Qt5.7, the capacity is preserved.
     m_commentRegions.clear();
 
     if (!result) {
@@ -318,12 +308,9 @@ void HGMarkdownHighlighter::initHtmlCommentRegionsFromResult()
             continue;
         }
 
-        m_commentRegions.push_back(VElementRegion(elem->pos, elem->end));
-
+        initBlockElementRegionOne(m_commentRegions, elem->pos, elem->end);
         elem = elem->next;
     }
-
-    qDebug() << "highlighter: parse" << m_commentRegions.size() << "HTML comment regions";
 }
 
 void HGMarkdownHighlighter::initImageRegionsFromResult()
@@ -332,7 +319,6 @@ void HGMarkdownHighlighter::initImageRegionsFromResult()
     m_imageRegions.clear();
 
     if (!result) {
-        emit imageLinksUpdated(m_imageRegions);
         return;
     }
 
@@ -346,10 +332,6 @@ void HGMarkdownHighlighter::initImageRegionsFromResult()
         m_imageRegions.push_back(VElementRegion(elem->pos, elem->end));
         elem = elem->next;
     }
-
-    qDebug() << "highlighter: parse" << m_imageRegions.size() << "image regions";
-
-    emit imageLinksUpdated(m_imageRegions);
 }
 
 void HGMarkdownHighlighter::initVerbatimBlocksFromResult()
@@ -384,7 +366,6 @@ void HGMarkdownHighlighter::initHeaderRegionsFromResult()
     m_headerRegions.clear();
 
     if (!result) {
-        emit headersUpdated(m_headerRegions);
         return;
     }
 
@@ -392,8 +373,7 @@ void HGMarkdownHighlighter::initHeaderRegionsFromResult()
     for (int i = 0; i < 6; ++i) {
         pmh_element *elem = result[hx[i]];
         while (elem != NULL) {
-            if (elem->end <= elem->pos
-                || !isValidHeader(elem->pos, elem->end)) {
+            if (elem->end <= elem->pos) {
                 elem = elem->next;
                 continue;
             }
@@ -411,10 +391,6 @@ void HGMarkdownHighlighter::initHeaderRegionsFromResult()
     }
 
     std::sort(m_headerRegions.begin(), m_headerRegions.end());
-
-    qDebug() << "highlighter: parse" << m_headerRegions.size() << "header regions";
-
-    emit headersUpdated(m_headerRegions);
 }
 
 void HGMarkdownHighlighter::initBlockHighlihgtOne(unsigned long pos,
@@ -523,13 +499,15 @@ static bool intersect(const QList<QPair<int, int>> &p_indices, int &p_start, int
     return false;
 }
 
-void HGMarkdownHighlighter::highlightMathJax(const QString &p_text)
+void HGMarkdownHighlighter::highlightMathJax(const QTextBlock &p_block, const QString &p_text)
 {
     const int blockMarkLength = 2;
     const int inlineMarkLength = 1;
 
     VTextBlockData *blockData = currentBlockData();
     Q_ASSERT(blockData);
+
+    int blockNumber = p_block.blockNumber();
 
     int startIdx = 0;
     // Next position to search.
@@ -542,71 +520,84 @@ void HGMarkdownHighlighter::highlightMathJax(const QString &p_text)
     // Mathjax block formula.
     if (state != HighlightBlockState::MathjaxBlock) {
         fromPreBlock = false;
-        startIdx = m_mathjaxBlockExp.indexIn(p_text);
-        pos = startIdx + m_mathjaxBlockExp.matchedLength();
-        startIdx = pos - blockMarkLength;
+        startIdx = findMathjaxMarker(blockNumber, p_text, pos, m_mathjaxBlockExp, blockMarkLength);
+        pos = startIdx + blockMarkLength;
     }
 
     while (startIdx >= 0) {
-        int endIdx = m_mathjaxBlockExp.indexIn(p_text, pos);
+        int endIdx = findMathjaxMarker(blockNumber, p_text, pos, m_mathjaxBlockExp, blockMarkLength);
         int mathLength = 0;
         MathjaxInfo info;
+        bool valid = false;
         if (endIdx == -1) {
-            setCurrentBlockState(HighlightBlockState::MathjaxBlock);
             mathLength = p_text.length() - startIdx;
-            pos = startIdx + mathLength;
+            pos = p_text.length();
 
-            info.m_previewedAsBlock = false;
-            info.m_index = startIdx,
-            info.m_length = mathLength;
-            if (fromPreBlock) {
-                VTextBlockData *preBlockData = previousBlockData();
-                Q_ASSERT(preBlockData);
-                const MathjaxInfo &preInfo = preBlockData->getPendingMathjax();
-                info.m_text = preInfo.text() + "\n" + p_text.mid(startIdx, mathLength);
-            } else {
-                info.m_text = p_text.mid(startIdx, mathLength);
+            if (isValidMathjaxRegion(blockNumber, startIdx, pos)) {
+                valid = true;
+                setCurrentBlockState(HighlightBlockState::MathjaxBlock);
+                info.m_previewedAsBlock = false;
+                info.m_index = startIdx,
+                info.m_length = mathLength;
+                if (fromPreBlock) {
+                    VTextBlockData *preBlockData = previousBlockData();
+                    Q_ASSERT(preBlockData);
+                    const MathjaxInfo &preInfo = preBlockData->getPendingMathjax();
+                    info.m_text = preInfo.text() + "\n" + p_text.mid(startIdx, mathLength);
+                } else {
+                    info.m_text = p_text.mid(startIdx, mathLength);
+                }
+
+                blockData->setPendingMathjax(info);
             }
-
-            blockData->setPendingMathjax(info);
         } else {
             // Found end marker of a formula.
-            mathLength = endIdx - startIdx + m_mathjaxBlockExp.matchedLength();
-            pos = startIdx + mathLength;
+            pos = endIdx + blockMarkLength;
+            mathLength = pos - startIdx;
 
-            info.m_previewedAsBlock = false;
-            info.m_index = startIdx;
-            info.m_length = mathLength;
-            if (fromPreBlock) {
-                // A cross-block formula.
-                if (pos >= p_text.length()) {
-                    info.m_previewedAsBlock = true;
+            if (isValidMathjaxRegion(blockNumber, startIdx, pos)) {
+                valid = true;
+                info.m_previewedAsBlock = false;
+                info.m_index = startIdx;
+                info.m_length = mathLength;
+                if (fromPreBlock) {
+                    // A cross-block formula.
+                    if (pos >= p_text.length()) {
+                        info.m_previewedAsBlock = true;
+                    }
+
+                    VTextBlockData *preBlockData = previousBlockData();
+                    Q_ASSERT(preBlockData);
+                    const MathjaxInfo &preInfo = preBlockData->getPendingMathjax();
+                    info.m_text = preInfo.text() + "\n" + p_text.mid(startIdx, mathLength);
+                } else {
+                    // A formula within one block.
+                    if (pos >= p_text.length() && startIdx == 0) {
+                        info.m_previewedAsBlock = true;
+                    }
+
+                    info.m_text = p_text.mid(startIdx, mathLength);
                 }
 
-                VTextBlockData *preBlockData = previousBlockData();
-                Q_ASSERT(preBlockData);
-                const MathjaxInfo &preInfo = preBlockData->getPendingMathjax();
-                info.m_text = preInfo.text() + "\n" + p_text.mid(startIdx, mathLength);
-            } else {
-                // A formula within one block.
-                if (pos >= p_text.length() && startIdx == 0) {
-                    info.m_previewedAsBlock = true;
-                }
-
-                info.m_text = p_text.mid(startIdx, mathLength);
+                blockData->addMathjax(info);
             }
-
-            blockData->addMathjax(info);
         }
 
         fromPreBlock = false;
 
-        blockIdices.append(QPair<int, int>(startIdx, pos));
+        if (valid) {
+            blockIdices.append(QPair<int, int>(startIdx, pos));
+            setFormat(startIdx, mathLength, m_mathjaxFormat);
+            startIdx = findMathjaxMarker(blockNumber, p_text, pos, m_mathjaxBlockExp, blockMarkLength);
+            pos = startIdx + blockMarkLength;
+        } else {
+            // Make the second mark as the first one and try again.
+            if (endIdx == -1) {
+                break;
+            }
 
-        setFormat(startIdx, mathLength, m_mathjaxFormat);
-        startIdx = m_mathjaxBlockExp.indexIn(p_text, pos);
-        pos = startIdx + m_mathjaxBlockExp.matchedLength();
-        startIdx = pos - blockMarkLength;
+            startIdx = pos - blockMarkLength;
+        }
     }
 
     // Mathjax inline formula.
@@ -615,24 +606,25 @@ void HGMarkdownHighlighter::highlightMathJax(const QString &p_text)
     fromPreBlock = true;
     if (state != HighlightBlockState::MathjaxInline) {
         fromPreBlock = false;
-        startIdx = m_mathjaxInlineExp.indexIn(p_text);
-        pos = startIdx + m_mathjaxInlineExp.matchedLength();
-        startIdx = pos - inlineMarkLength;
+        startIdx = findMathjaxMarker(blockNumber, p_text, pos, m_mathjaxInlineExp, inlineMarkLength);
+        pos = startIdx + inlineMarkLength;
     }
 
     while (startIdx >= 0) {
-        int endIdx = m_mathjaxInlineExp.indexIn(p_text, pos);
+        int endIdx = findMathjaxMarker(blockNumber, p_text, pos, m_mathjaxInlineExp, inlineMarkLength);
         int mathLength = 0;
+        bool valid = false;
         if (endIdx == -1) {
-            setCurrentBlockState(HighlightBlockState::MathjaxBlock);
             mathLength = p_text.length() - startIdx;
+            pos = p_text.length();
         } else {
-            mathLength = endIdx - startIdx + m_mathjaxInlineExp.matchedLength();
+            pos = endIdx + inlineMarkLength;
+            mathLength = pos - startIdx;
         }
 
-        pos = startIdx + mathLength;
+        valid = isValidMathjaxRegion(blockNumber, startIdx, pos);
         // Check if it intersect with blocks.
-        if (!intersect(blockIdices, startIdx, pos)) {
+        if (valid && !intersect(blockIdices, startIdx, pos)) {
             // A valid inline mathjax.
             MathjaxInfo info;
             if (endIdx == -1) {
@@ -741,7 +733,7 @@ void HGMarkdownHighlighter::highlightLinkWithSpacesInURL(const QString &p_text)
     }
 }
 
-void HGMarkdownHighlighter::parse(bool p_fast)
+void HGMarkdownHighlighter::parse()
 {
     if (!parsing.testAndSetRelaxed(0, 1)) {
         return;
@@ -761,15 +753,19 @@ void HGMarkdownHighlighter::parse(bool p_fast)
 
     m_blockHLResultReady = true;
 
-    if (!p_fast) {
-        initHtmlCommentRegionsFromResult();
+    initHtmlCommentRegionsFromResult();
 
-        initImageRegionsFromResult();
+    initImageRegionsFromResult();
 
-        initHeaderRegionsFromResult();
+    initHeaderRegionsFromResult();
 
-        initVerbatimBlocksFromResult();
-    }
+    initVerbatimBlocksFromResult();
+
+    initInlineCodeRegionsFromResult();
+
+    initBoldItalicRegionsFromResult();
+
+    initLinkRegionsFromResult();
 
     if (result) {
         pmh_free_elements(result);
@@ -804,7 +800,7 @@ void HGMarkdownHighlighter::parseInternal()
     memcpy(content, data, len);
     content[len] = '\0';
 
-    pmh_markdown_to_elements(content, pmh_EXT_NONE, &result);
+    pmh_markdown_to_elements(content, pmh_EXT_STRIKE, &result);
 }
 
 void HGMarkdownHighlighter::handleContentChange(int /* position */, int charsRemoved, int charsAdded)
@@ -813,6 +809,8 @@ void HGMarkdownHighlighter::handleContentChange(int /* position */, int charsRem
         return;
     }
 
+    m_signalOut = false;
+
     timer->stop();
     timer->start();
 }
@@ -820,17 +818,15 @@ void HGMarkdownHighlighter::handleContentChange(int /* position */, int charsRem
 void HGMarkdownHighlighter::startParseAndHighlight(bool p_fast)
 {
     qDebug() << "HGMarkdownHighlighter start a new parse (fast" << p_fast << ")";
-    parse(p_fast);
+    parse();
 
-    if (p_fast) {
-        rehighlight();
-    } else {
-        if (!updateCodeBlocks()) {
-            rehighlight();
-        }
+    m_signalOut = !p_fast;
 
-        highlightChanged();
+    if (!p_fast) {
+        updateCodeBlocks();
     }
+
+    rehighlight();
 }
 
 void HGMarkdownHighlighter::updateHighlight()
@@ -989,11 +985,12 @@ bool HGMarkdownHighlighter::isBlockInsideCommentRegion(const QTextBlock &p_block
         return false;
     }
 
-    int start = p_block.position();
-    int end = start + p_block.length();
-
-    for (auto const & reg : m_commentRegions) {
-        if (reg.contains(start) && reg.contains(end)) {
+    auto it = m_commentRegions.find(p_block.blockNumber());
+    if (it != m_commentRegions.end()) {
+        const QVector<VElementRegion> &regs = it.value();
+        if (regs.size() == 1
+            && regs[0].m_startPos == 0
+            && regs[0].m_endPos == p_block.length()) {
             return true;
         }
     }
@@ -1005,27 +1002,6 @@ void HGMarkdownHighlighter::highlightChanged()
 {
     m_completeTimer->stop();
     m_completeTimer->start();
-}
-
-bool HGMarkdownHighlighter::isValidHeader(unsigned long p_pos, unsigned long p_end)
-{
-    // There must exist spaces after #s.
-    // No more than 6 #s.
-    int nrNumberSign = 0;
-    for (unsigned long i = p_pos; i < p_end; ++i) {
-        QChar ch = document->characterAt(i);
-        if (ch.isSpace()) {
-            return nrNumberSign > 0;
-        } else if (ch == QChar('#')) {
-            if (++nrNumberSign > 6) {
-                return false;
-            }
-        } else {
-            return false;
-        }
-    }
-
-    return false;
 }
 
 bool HGMarkdownHighlighter::isValidHeader(const QString &p_text)
@@ -1051,18 +1027,20 @@ bool HGMarkdownHighlighter::isValidHeader(const QString &p_text)
 
 void HGMarkdownHighlighter::highlightHeaderFast(int p_blockNumber, const QString &p_text)
 {
-    if (currentBlockState() != HighlightBlockState::Normal) {
-        return;
-    }
-
     auto it = m_headerBlocks.find(p_blockNumber);
     if (it != m_headerBlocks.end()) {
         const HeaderBlockInfo &info = it.value();
         if (!isValidHeader(p_text)) {
             // Set an empty format to clear formats. It seems to work.
             setFormat(0, p_text.size(), QTextCharFormat());
-        } else if (info.m_length < p_text.size()) {
-            setFormat(info.m_length, p_text.size() - info.m_length, m_headerStyles[info.m_level]);
+        } else {
+            if (info.m_length < p_text.size()) {
+                setFormat(info.m_length,
+                          p_text.size() - info.m_length,
+                          m_headerStyles[info.m_level]);
+            }
+
+            setCurrentBlockState(HighlightBlockState::Header);
         }
     }
 }
@@ -1091,4 +1069,241 @@ void HGMarkdownHighlighter::updateMathjaxBlocks()
     }
 
     emit mathjaxBlocksUpdated(blocks);
+}
+
+void HGMarkdownHighlighter::initInlineCodeRegionsFromResult()
+{
+    m_inlineCodeRegions.clear();
+
+    if (!result) {
+        return;
+    }
+
+    pmh_element *elem = result[pmh_CODE];
+    while (elem != NULL) {
+        if (elem->end <= elem->pos) {
+            elem = elem->next;
+            continue;
+        }
+
+        initBlockElementRegionOne(m_inlineCodeRegions, elem->pos, elem->end);
+        elem = elem->next;
+    }
+}
+
+void HGMarkdownHighlighter::initBoldItalicRegionsFromResult()
+{
+    m_boldItalicRegions.clear();
+
+    if (!result) {
+        return;
+    }
+
+    pmh_element_type types[2] = {pmh_EMPH, pmh_STRONG};
+
+    for (int i = 0; i < 2; ++i) {
+        pmh_element *elem = result[types[i]];
+        while (elem != NULL) {
+            if (elem->end <= elem->pos) {
+                elem = elem->next;
+                continue;
+            }
+
+            initBlockElementRegionOne(m_boldItalicRegions, elem->pos, elem->end);
+            elem = elem->next;
+        }
+    }
+}
+
+void HGMarkdownHighlighter::initLinkRegionsFromResult()
+{
+    m_linkRegions.clear();
+
+    if (!result) {
+        return;
+    }
+
+    pmh_element_type types[2] = {pmh_LINK, pmh_IMAGE};
+
+    for (int i = 0; i < 2; ++i) {
+        pmh_element *elem = result[types[i]];
+        while (elem != NULL) {
+            if (elem->end <= elem->pos) {
+                elem = elem->next;
+                continue;
+            }
+
+            initBlockElementRegionOne(m_linkRegions, elem->pos, elem->end);
+            elem = elem->next;
+        }
+    }
+}
+
+void HGMarkdownHighlighter::initBlockElementRegionOne(QHash<int, QVector<VElementRegion>> &p_regs,
+                                                      unsigned long p_pos,
+                                                      unsigned long p_end)
+{
+    // When the the highlight element is at the end of document, @p_end will equals
+    // to the characterCount.
+    unsigned int nrChar = (unsigned int)document->characterCount();
+    if (p_end >= nrChar && nrChar > 0) {
+        p_end = nrChar - 1;
+    }
+
+    int startBlockNum = document->findBlock(p_pos).blockNumber();
+    int endBlockNum = document->findBlock(p_end).blockNumber();
+
+    for (int i = startBlockNum; i <= endBlockNum; ++i)
+    {
+        QTextBlock block = document->findBlockByNumber(i);
+        int blockStartPos = block.position();
+
+        QVector<VElementRegion> &regs = p_regs[i];
+        int start, end;
+        if (i == startBlockNum) {
+            start = p_pos - blockStartPos;
+            end = (startBlockNum == endBlockNum) ? (p_end - blockStartPos)
+                                                 : block.length();
+        } else if (i == endBlockNum) {
+            start = 0;
+            end = p_end - blockStartPos;
+        } else {
+            start = 0;
+            end = block.length();
+        }
+
+        regs.append(VElementRegion(start, end));
+    }
+}
+
+static bool indexInsideRegion(const QVector<VElementRegion> &p_regions, int p_idx)
+{
+    for (auto const & reg : p_regions) {
+        if (reg.contains(p_idx)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int HGMarkdownHighlighter::findMathjaxMarker(int p_blockNumber,
+                                             const QString &p_text,
+                                             int p_pos,
+                                             QRegExp &p_reg,
+                                             int p_markerLength)
+{
+    if (p_pos >= p_text.size()) {
+        return -1;
+    }
+
+    int idx = -1;
+    auto inlineCodeIt = m_inlineCodeRegions.find(p_blockNumber);
+    auto commentIt = m_commentRegions.find(p_blockNumber);
+    auto boldItalicIt = m_boldItalicRegions.find(p_blockNumber);
+    auto linkIt = m_linkRegions.find(p_blockNumber);
+
+    while (p_pos < p_text.size()) {
+        idx = p_reg.indexIn(p_text, p_pos);
+        if (idx == -1) {
+            return idx;
+        }
+
+        p_pos = idx + p_reg.matchedLength();
+        idx = p_pos - p_markerLength;
+
+        // Check if this idx is legal.
+        // Check inline code.
+        if (inlineCodeIt != m_inlineCodeRegions.end()) {
+            if (indexInsideRegion(inlineCodeIt.value(), idx)) {
+                idx = -1;
+                continue;
+            }
+        }
+
+        if (commentIt != m_commentRegions.end()) {
+            if (indexInsideRegion(commentIt.value(), idx)) {
+                idx = -1;
+                continue;
+            }
+        }
+
+        if (boldItalicIt != m_boldItalicRegions.end()) {
+            if (indexInsideRegion(boldItalicIt.value(), idx)) {
+                idx = -1;
+                continue;
+            }
+        }
+
+        if (linkIt != m_linkRegions.end()) {
+            if (indexInsideRegion(linkIt.value(), idx)) {
+                idx = -1;
+                continue;
+            }
+        }
+
+        break;
+    }
+
+    return idx;
+}
+
+static bool intersectRegion(const QVector<VElementRegion> &p_regions,
+                            int p_start,
+                            int p_end)
+{
+    for (auto const & reg : p_regions) {
+        if (reg.intersect(p_start, p_end)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool HGMarkdownHighlighter::isValidMathjaxRegion(int p_blockNumber,
+                                                 int p_start,
+                                                 int p_end)
+{
+    auto inlineCodeIt = m_inlineCodeRegions.find(p_blockNumber);
+    if (inlineCodeIt != m_inlineCodeRegions.end()) {
+        if (intersectRegion(inlineCodeIt.value(), p_start, p_end)) {
+            return false;
+        }
+    }
+
+    auto commentIt = m_commentRegions.find(p_blockNumber);
+    if (commentIt != m_commentRegions.end()) {
+        if (intersectRegion(commentIt.value(), p_start, p_end)) {
+            return false;
+        }
+    }
+
+    auto boldItalicIt = m_boldItalicRegions.find(p_blockNumber);
+    if (boldItalicIt != m_boldItalicRegions.end()) {
+        if (intersectRegion(boldItalicIt.value(), p_start, p_end)) {
+            return false;
+        }
+    }
+
+    auto linkIt = m_linkRegions.find(p_blockNumber);
+    if (linkIt != m_linkRegions.end()) {
+        if (intersectRegion(linkIt.value(), p_start, p_end)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void HGMarkdownHighlighter::completeHighlight()
+{
+    if (m_signalOut) {
+        m_signalOut = false;
+        updateMathjaxBlocks();
+        emit imageLinksUpdated(m_imageRegions);
+        emit headersUpdated(m_headerRegions);
+    }
+
+    emit highlightCompleted();
 }

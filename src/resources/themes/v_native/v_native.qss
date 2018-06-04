@@ -29,10 +29,26 @@ QDockWidget::Title {
 
 QDockWidget::close-button, QDockWidget::float-button {
     border: none;
+    icon-size: $16px;
+    width: $16px;
 }
 
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
     background: @dockwidget_button_hover_bg;
+}
+
+QDockWidget::close-button {
+    subcontrol-position: top right;
+    subcontrol-origin: margin;
+    position: absolute;
+    top: 0px; right: 0px; bottom: 0px;
+}
+
+QDockWidget::float-button {
+    subcontrol-position: top right;
+    subcontrol-origin: margin;
+    position: absolute;
+    top: 0px; right: $18px; bottom: 0px;
 }
 /* End DockWidget */
 
@@ -294,10 +310,10 @@ VButtonMenuItem:disabled {
 /* QComboBox */
 QComboBox#NotebookSelector {
     border: none;
-    font-size: 13pt;
-    padding-top: 3px;
-    padding-bottom: 3px;
-    icon-size: $30px;
+    font-size: 12pt;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    icon-size: $24px;
     background: @combobox_bg;
 }
 
@@ -328,13 +344,13 @@ QComboBox#NotebookSelector::down-arrow:disabled {
 QComboBox#NotebookSelector QListWidget {
     border: 1px solid @combobox_view_border;
     background-color: @combobox_bg;
-    font-size: 13pt;
-    icon-size: $30px;
+    font-size: 12pt;
+    icon-size: $24px;
 }
 
 QComboBox#NotebookSelector QListWidget::item {
-    padding-top: $10px;
-    padding-bottom: $10px;
+    padding-top: $5px;
+    padding-bottom: $5px;
 }
 
 QComboBox#NotebookSelector QListWidget::item:hover {
@@ -436,6 +452,14 @@ QLineEdit[VimCommandLine="true"] {
     background: @lineedit_bg;
 }
 
+QLineEdit[EmbeddedEdit="true"] {
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    color: @lineedit_fg;
+    background: transparent;
+}
+
 VUniversalEntry VMetaWordLineEdit {
     border: 1px solid @lineedit_border;
 }
@@ -482,6 +506,7 @@ QListView::item {
 /* QSplitter */
 QSplitter {
     border: none;
+    margin-left: $3px;
 }
 
 QSplitter::handle {

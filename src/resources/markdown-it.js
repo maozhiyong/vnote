@@ -72,6 +72,14 @@ mdit = mdit.use(window.markdownitHeadingAnchor, {
     }
 });
 
+// Enable file: scheme.
+var validateLinkMDIT = mdit.validateLink;
+var fileSchemeRE = /^file:/;
+mdit.validateLink = function(url) {
+    var str = url.trim().toLowerCase();
+    return fileSchemeRE.test(str) ? true : validateLinkMDIT(url);
+};
+
 mdit = mdit.use(window.markdownitTaskLists);
 
 if (VMarkdownitOption.sub) {
@@ -82,7 +90,20 @@ if (VMarkdownitOption.sup) {
     mdit = mdit.use(window.markdownitSup);
 }
 
+var metaDataText = null;
+if (VMarkdownitOption.metadata) {
+    mdit = mdit.use(window.markdownitFrontMatter, function(text){
+        metaDataText = text;
+    });
+}
+
+if (VMarkdownitOption.emoji) {
+    mdit = mdit.use(window.markdownitEmoji);
+}
+
 mdit = mdit.use(window.markdownitFootnote);
+
+mdit = mdit.use(window["markdown-it-imsize.js"]);
 
 var mdHasTocSection = function(markdown) {
     var n = markdown.search(/(\n|^)\[toc\]/i);
@@ -106,12 +127,14 @@ var updateText = function(text) {
     }
 
     asyncJobsCount = 0;
+    metaDataText = null;
 
     var needToc = mdHasTocSection(text);
     var html = markdownToHtml(text, needToc);
     contentDiv.innerHTML = html;
     handleToc(needToc);
     insertImageCaption();
+    handleMetaData();
     renderMermaid('lang-mermaid');
     renderFlowchart(['lang-flowchart', 'lang-flow']);
     renderPlantUML('lang-puml');
@@ -150,4 +173,21 @@ var textToHtml = function(identifier, id, timeStamp, text, inlineStyle) {
     }
 
     content.textToHtmlCB(identifier, id, timeStamp, html);
+};
+
+// Add a PRE containing metaDataText if it is not empty.
+var handleMetaData = function() {
+    if (!metaDataText || metaDataText.length == 0) {
+        return;
+    }
+
+    var pre = document.createElement('pre');
+    var code = document.createElement('code');
+    code.classList.add(VMetaDataCodeClass);
+
+    var text = hljs.highlight('yaml', metaDataText, true).value;
+    code.innerHTML = text;
+
+    pre.appendChild(code);
+    contentDiv.insertAdjacentElement('afterbegin', pre);
 };

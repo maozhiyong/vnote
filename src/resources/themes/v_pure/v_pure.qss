@@ -40,7 +40,7 @@ QMenuBar::item:selected {
 QMenu {
     background: @menu_bg;
     color: @menu_fg;
-    margin: 2px;
+    border: 2px solid @menu_border_bg;
 }
 
 QMenu::icon {
@@ -162,10 +162,26 @@ QDockWidget::Title {
 
 QDockWidget::close-button, QDockWidget::float-button {
     border: none;
+    icon-size: $16px;
+    width: $16px;
 }
 
 QDockWidget::close-button:hover, QDockWidget::float-button:hover {
     background: @dockwidget_button_hover_bg;
+}
+
+QDockWidget::close-button {
+    subcontrol-position: top right;
+    subcontrol-origin: margin;
+    position: absolute;
+    top: 0px; right: 0px; bottom: 0px;
+}
+
+QDockWidget::float-button {
+    subcontrol-position: top right;
+    subcontrol-origin: margin;
+    position: absolute;
+    top: 0px; right: $18px; bottom: 0px;
 }
 /* End DockWidget */
 
@@ -274,6 +290,7 @@ QPushButton[ToolBoxActiveBtn="true"] {
     padding: 4px 10px 4px 4px;
     margin: 0px;
     border: none;
+    font-weight: bold;
     color: @pushbutton_toolboxbtn_active_fg;
     background-color: @pushbutton_toolboxbtn_active_bg;
     min-width: -1;
@@ -402,11 +419,10 @@ VButtonMenuItem:disabled {
 /* QComboBox */
 QComboBox#NotebookSelector {
     border: none;
-    border-bottom: $2px solid @combobox_notebookselector_border;
-    font-size: 13pt;
-    padding-top: 3px;
-    padding-bottom: 3px;
-    icon-size: $30px;
+    font-size: 12pt;
+    padding-top: 5px;
+    padding-bottom: 5px;
+    icon-size: $24px;
     font-weight: bold;
     color: @combobox_notebookselector_fg;
     background: @combobox_notebookselector_bg;
@@ -425,14 +441,14 @@ QComboBox#NotebookSelector:hover {
 QComboBox#NotebookSelector QListWidget {
     border: 1px solid @combobox_view_border;
     background-color: @combobox_bg;
-    font-size: 13pt;
+    font-size: 12pt;
     font-weight: normal;
-    icon-size: $30px;
+    icon-size: $24px;
 }
 
 QComboBox#NotebookSelector QListWidget::item {
-    padding-top: $10px;
-    padding-bottom: $10px;
+    padding-top: $5px;
+    padding-bottom: $5px;
 }
 
 QComboBox#NotebookSelector QListWidget::item:hover {
@@ -614,6 +630,24 @@ QLineEdit[VimCommandLine="true"]:hover {
     border: none;
 }
 
+QLineEdit[EmbeddedEdit="true"] {
+    padding: 0px;
+    margin: 0px;
+    border: none;
+    color: @lineedit_fg;
+    background: transparent;
+}
+
+QLineEdit[EmbeddedEdit="true"]:focus {
+    background: @lineedit_focus_bg;
+    border: none;
+}
+
+QLineEdit[EmbeddedEdit="true"]:hover {
+    background: @lineedit_hover_bg;
+    border: none;
+}
+
 QLineEdit {
     border: 1px solid @lineedit_border;
     padding: 3px;
@@ -674,9 +708,28 @@ QTabBar::tab {
     color: @tabbar_fg;
     background: @tabbar_bg;
     border: none;
+}
+
+QTabBar::tab:top, QTabBar::tab:bottom {
     border-top: $2px solid transparent;
     border-right: $1px solid @tabbar_border;
-    padding: 2px 0px 2px 0px;
+    /* MUST leave right and left padding 0px. */
+    padding: $2px 0px $2px 0px;
+    height: $20px;
+}
+
+QTabBar::tab:right {
+    border-left: $3px solid transparent;
+    border-bottom: $1px solid @tabbar_border;
+    padding: $5px $2px $5px $2px;
+    min-width: $20px;
+}
+
+QTabBar::tab:left {
+    border-right: $3px solid transparent;
+    border-bottom: $1px solid @tabbar_border;
+    padding: $5px $2px $5px $2px;
+    min-width: $20px;
 }
 
 QTabBar::tab:hover {
@@ -687,7 +740,18 @@ QTabBar::tab:hover {
 QTabBar::tab:selected {
     color: @tabbar_selected_fg;
     background: @tabbar_selected_bg;
+}
+
+QTabBar::tab:top:selected, QTabBar::tab:bottom:selected {
     border-top: $2px solid @master_bg;
+}
+
+QTabBar::tab:right:selected {
+    border-left: $3px solid @master_bg;
+}
+
+QTabBar::tab:left:selected {
+    border-right: $3px solid @master_bg;
 }
 
 QTabBar::close-button {
@@ -851,11 +915,16 @@ QListView::item:selected:!active {
     color: @listview_item_selected_inactive_fg;
     background: @listview_item_selected_inactive_bg;
 }
+
+QListView::item:disabled {
+    background: transparent;
+}
 /* End QListView */
 
 /* QSplitter */
 QSplitter#MainSplitter {
     border: none;
+    margin-left: $3px;
 }
 
 QSplitter {
@@ -1246,6 +1315,10 @@ QWidget#FindReplaceTitleWidget {
 
 QWidget[ToolBoxTitle="true"] {
     border-bottom: $2px solid @toolbox_title_border;
+}
+
+QWidget[ToolBoxTitle="true"] QPushButton[ToolBoxTitleBtn="true"] {
+    height: $20px;
 }
 
 QWidget[MainEditor="true"] {

@@ -15,17 +15,20 @@ extern VMainWindow *g_mainWin;
 extern VNote *g_vnote;
 
 VCart::VCart(QWidget *p_parent)
-    : QWidget(p_parent)
+    : QWidget(p_parent),
+      m_initialized(false),
+      m_uiInitialized(false)
 {
-    setupUI();
-
-    updateNumberLabel();
-
-    initActions();
 }
 
 void VCart::setupUI()
 {
+    if (m_uiInitialized) {
+        return;
+    }
+
+    m_uiInitialized = true;
+
     m_clearBtn = new QPushButton(VIconUtils::buttonDangerIcon(":/resources/icons/clear_cart.svg"), "");
     m_clearBtn->setToolTip(tr("Clear"));
     m_clearBtn->setProperty("FlatBtn", true);
@@ -41,7 +44,7 @@ void VCart::setupUI()
                                                   g_mainWin,
                                                   MessageBoxType::Danger);
                     if (ret == QMessageBox::Ok) {
-                        m_itemList->clear();
+                        m_itemList->clearAll();
                         updateNumberLabel();
                     }
                 }
@@ -55,7 +58,7 @@ void VCart::setupUI()
     btnLayout->addWidget(m_numLabel);
     btnLayout->setContentsMargins(0, 0, 0, 0);
 
-    m_itemList = new QListWidget();
+    m_itemList = new VListWidget();
     m_itemList->setAttribute(Qt::WA_MacShowFocusRect, false);
     m_itemList->setContextMenuPolicy(Qt::CustomContextMenu);
     m_itemList->setSelectionMode(QAbstractItemView::ExtendedSelection);
@@ -73,35 +76,6 @@ void VCart::setupUI()
     setLayout(mainLayout);
 }
 
-void VCart::initActions()
-{
-    m_openAct = new QAction(tr("&Open"), this);
-    m_openAct->setToolTip(tr("Open selected notes"));
-    connect(m_openAct, &QAction::triggered,
-            this, &VCart::openSelectedItems);
-
-    m_locateAct = new QAction(VIconUtils::menuIcon(":/resources/icons/locate_note.svg"),
-                              tr("&Locate To Folder"),
-                              this);
-    m_locateAct->setToolTip(tr("Locate the folder of current note"));
-    connect(m_locateAct, &QAction::triggered,
-            this, &VCart::locateCurrentItem);
-
-    m_deleteAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_cart_item.svg"),
-                              tr("&Delete"),
-                              this);
-    m_deleteAct->setToolTip(tr("Delete selected items from Cart"));
-    connect(m_deleteAct, &QAction::triggered,
-            this, &VCart::deleteSelectedItems);
-
-    m_sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
-                            tr("&Sort"),
-                            this);
-    m_sortAct->setToolTip(tr("Sort items in Cart"));
-    connect(m_sortAct, &QAction::triggered,
-            this, &VCart::sortItems);
-}
-
 void VCart::handleContextMenuRequested(QPoint p_pos)
 {
     QListWidgetItem *item = m_itemList->itemAt(p_pos);
@@ -109,13 +83,29 @@ void VCart::handleContextMenuRequested(QPoint p_pos)
     menu.setToolTipsVisible(true);
 
     if (item) {
-        int itemCount = m_itemList->selectedItems().size();
-        if (itemCount == 1) {
-            menu.addAction(m_openAct);
-            menu.addAction(m_locateAct);
+        QAction *openAct = new QAction(tr("&Open"), &menu);
+        openAct->setToolTip(tr("Open selected notes"));
+        connect(openAct, &QAction::triggered,
+                this, &VCart::openSelectedItems);
+        menu.addAction(openAct);
+
+        if (m_itemList->selectedItems().size() == 1) {
+            QAction *locateAct = new QAction(VIconUtils::menuIcon(":/resources/icons/locate_note.svg"),
+                                             tr("&Locate To Folder"),
+                                             &menu);
+            locateAct->setToolTip(tr("Locate the folder of current note"));
+            connect(locateAct, &QAction::triggered,
+                    this, &VCart::locateCurrentItem);
+            menu.addAction(locateAct);
         }
 
-        menu.addAction(m_deleteAct);
+        QAction *deleteAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_cart_item.svg"),
+                                         tr("&Delete"),
+                                         &menu);
+        deleteAct->setToolTip(tr("Delete selected items from Cart"));
+        connect(deleteAct, &QAction::triggered,
+                this, &VCart::deleteSelectedItems);
+        menu.addAction(deleteAct);
     }
 
     if (m_itemList->count() == 0) {
@@ -126,13 +116,21 @@ void VCart::handleContextMenuRequested(QPoint p_pos)
         menu.addSeparator();
     }
 
-    menu.addAction(m_sortAct);
+    QAction *sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
+                                   tr("&Sort"),
+                                   &menu);
+    sortAct->setToolTip(tr("Sort items in Cart"));
+    connect(sortAct, &QAction::triggered,
+            this, &VCart::sortItems);
+    menu.addAction(sortAct);
 
     menu.exec(m_itemList->mapToGlobal(p_pos));
 }
 
 void VCart::addFile(const QString &p_filePath)
 {
+    init();
+
     if (p_filePath.isEmpty()
         || findFileInCart(p_filePath) != -1) {
         return;
@@ -174,7 +172,15 @@ void VCart::deleteSelectedItems()
 
 void VCart::openSelectedItems() const
 {
-    openItem(m_itemList->currentItem());
+    QStringList files;
+    QList<QListWidgetItem *> selectedItems = m_itemList->selectedItems();
+    for (auto it : selectedItems) {
+        files << getFilePath(it);
+    }
+
+    if (!files.isEmpty()) {
+        g_mainWin->openFiles(files);
+    }
 }
 
 void VCart::locateCurrentItem()
@@ -208,11 +214,15 @@ QString VCart::getFilePath(const QListWidgetItem *p_item) const
 
 int VCart::count() const
 {
+    const_cast<VCart *>(this)->init();
+
     return m_itemList->count();
 }
 
 QVector<QString> VCart::getFiles() const
 {
+    const_cast<VCart *>(this)->init();
+
     QVector<QString> files;
     int cnt = m_itemList->count();
     for (int i = 0; i < cnt; ++i) {
@@ -265,4 +275,49 @@ void VCart::updateNumberLabel() const
     int cnt = m_itemList->count();
     m_numLabel->setText(tr("%1 %2").arg(cnt)
                                    .arg(cnt > 1 ? tr("Items") : tr("Item")));
+}
+
+void VCart::showNavigation()
+{
+    setupUI();
+
+    VNavigationMode::showNavigation(m_itemList);
+}
+
+bool VCart::handleKeyNavigation(int p_key, bool &p_succeed)
+{
+    static bool secondKey = false;
+    setupUI();
+
+    return VNavigationMode::handleKeyNavigation(m_itemList,
+                                                secondKey,
+                                                p_key,
+                                                p_succeed);
+}
+
+void VCart::init()
+{
+    if (m_initialized) {
+        return;
+    }
+
+    m_initialized = true;
+
+    setupUI();
+    updateNumberLabel();
+}
+
+void VCart::showEvent(QShowEvent *p_event)
+{
+    init();
+
+    QWidget::showEvent(p_event);
+}
+
+void VCart::focusInEvent(QFocusEvent *p_event)
+{
+    init();
+
+    QWidget::focusInEvent(p_event);
+    m_itemList->setFocus();
 }

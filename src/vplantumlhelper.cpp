@@ -14,7 +14,7 @@ extern VConfigManager *g_config;
 VPlantUMLHelper::VPlantUMLHelper(QObject *p_parent)
     : QObject(p_parent)
 {
-    prepareCommand(m_program, m_args);
+    prepareCommand(m_customCmd, m_program, m_args);
 }
 
 void VPlantUMLHelper::processAsync(int p_id,
@@ -29,18 +29,34 @@ void VPlantUMLHelper::processAsync(int p_id,
     connect(process, SIGNAL(finished(int, QProcess::ExitStatus)),
             this, SLOT(handleProcessFinished(int, QProcess::ExitStatus)));
 
-    QStringList args(m_args);
-    args << ("-t" + p_format);
+    if (m_customCmd.isEmpty()) {
+        QStringList args(m_args);
+        args << ("-t" + p_format);
+        qDebug() << m_program << args;
+        process->start(m_program, args);
+    } else {
+        QString cmd(m_customCmd);
+        cmd.replace("%0", p_format);
+        qDebug() << cmd;
+        process->start(cmd);
+    }
 
-    qDebug() << m_program << args;
+    if (process->write(p_text.toUtf8()) == -1) {
+        qWarning() << "fail to write to QProcess:" << process->errorString();
+    }
 
-    process->start(m_program, args);
-    process->write(p_text.toUtf8());
     process->closeWriteChannel();
 }
 
-void VPlantUMLHelper::prepareCommand(QString &p_program, QStringList &p_args) const
+void VPlantUMLHelper::prepareCommand(QString &p_customCmd,
+                                     QString &p_program,
+                                     QStringList &p_args) const
 {
+    p_customCmd = g_config->getPlantUMLCmd();
+    if (!p_customCmd.isEmpty()) {
+        return;
+    }
+
     p_program = "java";
 
     p_args << "-jar" << g_config->getPlantUMLJar();
@@ -56,6 +72,7 @@ void VPlantUMLHelper::prepareCommand(QString &p_program, QStringList &p_args) co
     }
 
     p_args << "-pipe";
+    p_args << g_config->getPlantUMLArgs();
 }
 
 void VPlantUMLHelper::handleProcessFinished(int p_exitCode, QProcess::ExitStatus p_exitStatus)
@@ -64,7 +81,12 @@ void VPlantUMLHelper::handleProcessFinished(int p_exitCode, QProcess::ExitStatus
     int id = process->property(TaskIdProperty).toInt();
     QString format = process->property(TaskFormatProperty).toString();
     TimeStamp timeStamp = process->property(TaskTimeStampProperty).toULongLong();
-    qDebug() << "process finished" << id << timeStamp << format << p_exitCode << p_exitStatus;
+    qDebug() << QString("PlantUML finished: id %1 timestamp %2 format %3 exitcode %4 exitstatus %5")
+                       .arg(id)
+                       .arg(timeStamp)
+                       .arg(format)
+                       .arg(p_exitCode)
+                       .arg(p_exitStatus);
     bool failed = true;
     if (p_exitStatus == QProcess::NormalExit) {
         if (p_exitCode < 0) {
@@ -82,13 +104,17 @@ void VPlantUMLHelper::handleProcessFinished(int p_exitCode, QProcess::ExitStatus
         qWarning() << "fail to start PlantUML process" << p_exitCode << p_exitStatus;
     }
 
-    if (failed) {
-        QByteArray errBa = process->readAllStandardError();
-        if (!errBa.isEmpty()) {
-            QString errStr(QString::fromLocal8Bit(errBa));
+    QByteArray errBa = process->readAllStandardError();
+    if (!errBa.isEmpty()) {
+        QString errStr(QString::fromLocal8Bit(errBa));
+        if (failed) {
             qWarning() << "PlantUML stderr:" << errStr;
+        } else {
+            qDebug() << "PlantUML stderr:" << errStr;
         }
+    }
 
+    if (failed) {
         emit resultReady(id, timeStamp, format, "");
     }
 

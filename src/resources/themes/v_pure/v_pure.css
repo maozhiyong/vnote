@@ -90,7 +90,6 @@ pre {
 
 code {
     font-family: Consolas, Monaco, Monospace, Courier;
-    font-size: 16px;
     color: #8E24AA;
     word-break: break-all;
 }
@@ -104,6 +103,10 @@ pre code {
     line-height: 1.5;
     font-family: Consolas, Monaco, Monospace, Courier;
     white-space: pre;
+}
+
+pre code.markdown-metadata {
+    border-left: 5px solid #00897B;
 }
 
 aside {
@@ -311,5 +314,6 @@ table.hljs-ln tr td.hljs-ln-code {
 }
 
 ::selection {
-  background: #64B5F6;
+  background: #1976D2;
+  color: #F5F5F5;
 }

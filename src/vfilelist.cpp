@@ -20,6 +20,7 @@
 #include "utils/viconutils.h"
 #include "dialog/vtipsdialog.h"
 #include "vcart.h"
+#include "vhistorylist.h"
 
 extern VConfigManager *g_config;
 extern VNote *g_vnote;
@@ -33,12 +34,12 @@ const QString VFileList::c_pasteShortcutSequence = "Ctrl+V";
 VFileList::VFileList(QWidget *parent)
     : QWidget(parent),
       VNavigationMode(),
+      m_openWithMenu(NULL),
       m_itemClicked(NULL),
       m_fileToCloseInSingleClick(NULL)
 {
     setupUI();
     initShortcuts();
-    initActions();
 
     m_clickTimer = new QTimer(this);
     m_clickTimer->setSingleShot(true);
@@ -65,10 +66,22 @@ void VFileList::setupUI()
     QLabel *titleLabel = new QLabel(tr("Notes"), this);
     titleLabel->setProperty("TitleLabel", true);
 
+    QPushButton *viewBtn = new QPushButton(VIconUtils::buttonIcon(":/resources/icons/view.svg"), "", this);
+    viewBtn->setToolTip(tr("View"));
+    viewBtn->setProperty("CornerBtn", true);
+
+    QMenu *viewMenu = new QMenu(this);
+    connect(viewMenu, &QMenu::aboutToShow,
+            this, [this, viewMenu]() {
+                updateViewMenu(viewMenu);
+            });
+    viewBtn->setMenu(viewMenu);
+
     m_numLabel = new QLabel(this);
 
     QHBoxLayout *titleLayout = new QHBoxLayout();
     titleLayout->addWidget(titleLabel);
+    titleLayout->addWidget(viewBtn);
     titleLayout->addStretch();
     titleLayout->addWidget(m_numLabel);
 
@@ -124,87 +137,6 @@ void VFileList::initShortcuts()
             });
 }
 
-void VFileList::initActions()
-{
-    newFileAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_note.svg"),
-                             tr("&New Note"), this);
-    VUtils::fixTextWithShortcut(newFileAct, "NewNote");
-    newFileAct->setToolTip(tr("Create a note in current folder"));
-    connect(newFileAct, SIGNAL(triggered(bool)),
-            this, SLOT(newFile()));
-
-    m_openInReadAct = new QAction(VIconUtils::menuIcon(":/resources/icons/reading.svg"),
-                                  tr("&Open In Read Mode"), this);
-    m_openInReadAct->setToolTip(tr("Open current note in read mode"));
-    connect(m_openInReadAct, &QAction::triggered,
-            this, [this]() {
-                QListWidgetItem *item = fileList->currentItem();
-                if (item) {
-                    emit fileClicked(getVFile(item), OpenFileMode::Read, true);
-                }
-            });
-
-    m_openInEditAct = new QAction(VIconUtils::menuIcon(":/resources/icons/editing.svg"),
-                                  tr("Open In &Edit Mode"), this);
-    m_openInEditAct->setToolTip(tr("Open current note in edit mode"));
-    connect(m_openInEditAct, &QAction::triggered,
-            this, [this]() {
-                QListWidgetItem *item = fileList->currentItem();
-                if (item) {
-                    emit fileClicked(getVFile(item), OpenFileMode::Edit, true);
-                }
-            });
-
-    deleteFileAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_note.svg"),
-                                tr("&Delete"), this);
-    deleteFileAct->setToolTip(tr("Delete selected note"));
-    connect(deleteFileAct, SIGNAL(triggered(bool)),
-            this, SLOT(deleteSelectedFiles()));
-
-    fileInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/note_info.svg"),
-                              tr("&Info\t%1").arg(VUtils::getShortcutText(c_infoShortcutSequence)), this);
-    fileInfoAct->setToolTip(tr("View and edit current note's information"));
-    connect(fileInfoAct, SIGNAL(triggered(bool)),
-            this, SLOT(fileInfo()));
-
-    copyAct = new QAction(VIconUtils::menuIcon(":/resources/icons/copy.svg"),
-                          tr("&Copy\t%1").arg(VUtils::getShortcutText(c_copyShortcutSequence)), this);
-    copyAct->setToolTip(tr("Copy selected notes"));
-    connect(copyAct, &QAction::triggered,
-            this, &VFileList::copySelectedFiles);
-
-    cutAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cut.svg"),
-                         tr("C&ut\t%1").arg(VUtils::getShortcutText(c_cutShortcutSequence)), this);
-    cutAct->setToolTip(tr("Cut selected notes"));
-    connect(cutAct, &QAction::triggered,
-            this, &VFileList::cutSelectedFiles);
-
-    pasteAct = new QAction(VIconUtils::menuIcon(":/resources/icons/paste.svg"),
-                           tr("&Paste\t%1").arg(VUtils::getShortcutText(c_pasteShortcutSequence)), this);
-    pasteAct->setToolTip(tr("Paste notes in current folder"));
-    connect(pasteAct, &QAction::triggered,
-            this, &VFileList::pasteFilesFromClipboard);
-
-    m_openLocationAct = new QAction(tr("&Open Note Location"), this);
-    m_openLocationAct->setToolTip(tr("Open the folder containing this note in operating system"));
-    connect(m_openLocationAct, &QAction::triggered,
-            this, &VFileList::openFileLocation);
-
-    m_addToCartAct = new QAction(tr("Add To Cart"), this);
-    m_addToCartAct->setToolTip(tr("Add selected notes to Cart for further processing"));
-    connect(m_addToCartAct, &QAction::triggered,
-            this, &VFileList::addFileToCart);
-
-    m_sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
-                            tr("&Sort"),
-                            this);
-    m_sortAct->setToolTip(tr("Sort notes in this folder manually"));
-    connect(m_sortAct, &QAction::triggered,
-            this, &VFileList::sortItems);
-
-    initOpenWithMenu();
-}
-
 void VFileList::setDirectory(VDirectory *p_directory)
 {
     // QPointer will be set to NULL automatically once the directory was deleted.
@@ -236,7 +168,9 @@ void VFileList::updateFileList()
         return;
     }
 
-    const QVector<VNoteFile *> &files = m_directory->getFiles();
+    QVector<VNoteFile *> files = m_directory->getFiles();
+    sortFiles(files, (ViewOrder)g_config->getNoteListViewOrder());
+
     for (int i = 0; i < files.size(); ++i) {
         VNoteFile *file = files[i];
         insertFileListItem(file);
@@ -272,6 +206,22 @@ void VFileList::addFileToCart() const
     }
 
     g_mainWin->showStatusMessage(tr("%1 %2 added to Cart")
+                                   .arg(items.size())
+                                   .arg(items.size() > 1 ? tr("notes") : tr("note")));
+}
+
+void VFileList::pinFileToHistory() const
+{
+    QList<QListWidgetItem *> items = fileList->selectedItems();
+
+    QStringList files;
+    for (int i = 0; i < items.size(); ++i) {
+        files << getVFile(items[i])->fetchPath();
+    }
+
+    g_mainWin->getHistoryList()->pinFiles(files);
+
+    g_mainWin->showStatusMessage(tr("%1 %2 pinned to History")
                                    .arg(items.size())
                                    .arg(items.size() > 1 ? tr("notes") : tr("note")));
 }
@@ -423,11 +373,9 @@ void VFileList::newFile()
             }
         }
 
-        QVector<QListWidgetItem *> items = updateFileListAdded();
-        Q_ASSERT(items.size() == 1);
-        fileList->setCurrentItem(items[0], QItemSelectionModel::ClearAndSelect);
-        // Qt seems not to update the QListWidget correctly. Manually force it to repaint.
-        fileList->update();
+        updateFileList();
+
+        locateFile(file);
 
         // Open it in edit mode
         emit fileCreated(file, OpenFileMode::Edit, true);
@@ -445,27 +393,6 @@ void VFileList::newFile()
             }
         }
     }
-}
-
-QVector<QListWidgetItem *> VFileList::updateFileListAdded()
-{
-    QVector<QListWidgetItem *> ret;
-    const QVector<VNoteFile *> &files = m_directory->getFiles();
-    for (int i = 0; i < files.size(); ++i) {
-        VNoteFile *file = files[i];
-        if (i >= fileList->count()) {
-            QListWidgetItem *item = insertFileListItem(file, false);
-            ret.append(item);
-        } else {
-            VNoteFile *itemFile = getVFile(fileList->item(i));
-            if (itemFile != file) {
-                QListWidgetItem *item = insertFileListItem(file, false);
-                ret.append(item);
-            }
-        }
-    }
-
-    return ret;
 }
 
 void VFileList::deleteSelectedFiles()
@@ -564,6 +491,7 @@ void VFileList::deleteFiles(const QVector<VNoteFile *> &p_files)
             g_mainWin->showStatusMessage(tr("%1 %2 deleted")
                                            .arg(nrDeleted)
                                            .arg(nrDeleted > 1 ? tr("notes") : tr("note")));
+            updateNumberLabel();
         }
     }
 }
@@ -584,25 +512,83 @@ void VFileList::contextMenuRequested(QPoint pos)
         VNoteFile *file = getVFile(item);
         if (file) {
             if (file->getDocType() == DocType::Markdown) {
-                menu.addAction(m_openInReadAct);
-                menu.addAction(m_openInEditAct);
+                QAction *openInReadAct = new QAction(VIconUtils::menuIcon(":/resources/icons/reading.svg"),
+                                                     tr("&Open In Read Mode"),
+                                                     &menu);
+                openInReadAct->setToolTip(tr("Open current note in read mode"));
+                connect(openInReadAct, &QAction::triggered,
+                        this, [this]() {
+                            QListWidgetItem *item = fileList->currentItem();
+                            if (item) {
+                                emit fileClicked(getVFile(item), OpenFileMode::Read, true);
+                            }
+                        });
+                menu.addAction(openInReadAct);
+
+                QAction *openInEditAct = new QAction(VIconUtils::menuIcon(":/resources/icons/editing.svg"),
+                                                     tr("Open In &Edit Mode"),
+                                                     &menu);
+                openInEditAct->setToolTip(tr("Open current note in edit mode"));
+                connect(openInEditAct, &QAction::triggered,
+                        this, [this]() {
+                            QListWidgetItem *item = fileList->currentItem();
+                            if (item) {
+                                emit fileClicked(getVFile(item), OpenFileMode::Edit, true);
+                            }
+                        });
+                menu.addAction(openInEditAct);
             }
 
-            menu.addMenu(m_openWithMenu);
+            menu.addMenu(getOpenWithMenu());
+
             menu.addSeparator();
         }
     }
 
+    QAction *newFileAct = new QAction(VIconUtils::menuIcon(":/resources/icons/create_note.svg"),
+                                      tr("&New Note"),
+                                      &menu);
+    VUtils::fixTextWithShortcut(newFileAct, "NewNote");
+    newFileAct->setToolTip(tr("Create a note in current folder"));
+    connect(newFileAct, SIGNAL(triggered(bool)),
+            this, SLOT(newFile()));
     menu.addAction(newFileAct);
 
     if (fileList->count() > 1) {
-        menu.addAction(m_sortAct);
+        QAction *sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
+                                       tr("&Sort"),
+                                       &menu);
+        sortAct->setToolTip(tr("Sort notes in this folder manually"));
+        connect(sortAct, &QAction::triggered,
+                this, &VFileList::sortItems);
+        menu.addAction(sortAct);
     }
 
     if (item) {
         menu.addSeparator();
+
+        QAction *deleteFileAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_note.svg"),
+                                             tr("&Delete"),
+                                             &menu);
+        deleteFileAct->setToolTip(tr("Delete selected note"));
+        connect(deleteFileAct, SIGNAL(triggered(bool)),
+                this, SLOT(deleteSelectedFiles()));
         menu.addAction(deleteFileAct);
+
+        QAction *copyAct = new QAction(VIconUtils::menuIcon(":/resources/icons/copy.svg"),
+                                       tr("&Copy\t%1").arg(VUtils::getShortcutText(c_copyShortcutSequence)),
+                                       &menu);
+        copyAct->setToolTip(tr("Copy selected notes"));
+        connect(copyAct, &QAction::triggered,
+                this, &VFileList::copySelectedFiles);
         menu.addAction(copyAct);
+
+        QAction *cutAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cut.svg"),
+                                      tr("C&ut\t%1").arg(VUtils::getShortcutText(c_cutShortcutSequence)),
+                                      &menu);
+        cutAct->setToolTip(tr("Cut selected notes"));
+        connect(cutAct, &QAction::triggered,
+                this, &VFileList::cutSelectedFiles);
         menu.addAction(cutAct);
     }
 
@@ -611,18 +597,50 @@ void VFileList::contextMenuRequested(QPoint pos)
             menu.addSeparator();
         }
 
+        QAction *pasteAct = new QAction(VIconUtils::menuIcon(":/resources/icons/paste.svg"),
+                                        tr("&Paste\t%1").arg(VUtils::getShortcutText(c_pasteShortcutSequence)),
+                                        &menu);
+        pasteAct->setToolTip(tr("Paste notes in current folder"));
+        connect(pasteAct, &QAction::triggered,
+                this, &VFileList::pasteFilesFromClipboard);
         menu.addAction(pasteAct);
     }
 
     if (item) {
         menu.addSeparator();
         if (selectedSize == 1) {
-            menu.addAction(m_openLocationAct);
+            QAction *openLocationAct = new QAction(VIconUtils::menuIcon(":/resources/icons/open_location.svg"),
+                                                   tr("&Open Note Location"),
+                                                   &menu);
+            openLocationAct->setToolTip(tr("Explore the folder containing this note in operating system"));
+            connect(openLocationAct, &QAction::triggered,
+                    this, &VFileList::openFileLocation);
+            menu.addAction(openLocationAct);
         }
 
-        menu.addAction(m_addToCartAct);
+        QAction *addToCartAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cart.svg"),
+                                            tr("Add To Cart"),
+                                            &menu);
+        addToCartAct->setToolTip(tr("Add selected notes to Cart for further processing"));
+        connect(addToCartAct, &QAction::triggered,
+                this, &VFileList::addFileToCart);
+        menu.addAction(addToCartAct);
+
+        QAction *pinToHistoryAct = new QAction(VIconUtils::menuIcon(":/resources/icons/pin.svg"),
+                                               tr("Pin To History"),
+                                               &menu);
+        pinToHistoryAct->setToolTip(tr("Pin selected notes to History"));
+        connect(pinToHistoryAct, &QAction::triggered,
+                this, &VFileList::pinFileToHistory);
+        menu.addAction(pinToHistoryAct);
 
         if (selectedSize == 1) {
+            QAction *fileInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/note_info.svg"),
+                                               tr("&Info (Rename)\t%1").arg(VUtils::getShortcutText(c_infoShortcutSequence)),
+                                               &menu);
+            fileInfoAct->setToolTip(tr("View and edit current note's information"));
+            connect(fileInfoAct, SIGNAL(triggered(bool)),
+                    this, SLOT(fileInfo()));
             menu.addAction(fileInfoAct);
         }
     }
@@ -685,12 +703,18 @@ void VFileList::handleItemClicked(QListWidgetItem *p_item)
             return;
         }
 
-        // Get current tab which will be closed if click timer timeouts.
-        VEditTab *tab = editArea->getCurrentTab();
-        if (tab) {
-            m_fileToCloseInSingleClick = tab->getFile();
-        } else {
+        // EditArea will open Unknown file using system's default program, in which
+        // case we should now close current file even after single click.
+        if (file->getDocType() == DocType::Unknown) {
             m_fileToCloseInSingleClick = NULL;
+        } else {
+            // Get current tab which will be closed if click timer timeouts.
+            VEditTab *tab = editArea->getCurrentTab();
+            if (tab) {
+                m_fileToCloseInSingleClick = tab->getFile();
+            } else {
+                m_fileToCloseInSingleClick = NULL;
+            }
         }
     }
 
@@ -730,7 +754,7 @@ bool VFileList::importFiles(const QStringList &p_files, QString *p_errMsg)
     QString dirPath = m_directory->fetchPath();
     QDir dir(dirPath);
 
-    int nrImported = 0;
+    QVector<VNoteFile *> importedFiles;
     for (int i = 0; i < p_files.size(); ++i) {
         const QString &file = p_files[i];
 
@@ -769,7 +793,7 @@ bool VFileList::importFiles(const QStringList &p_files, QString *p_errMsg)
 
         VNoteFile *destFile = m_directory->addFile(name, -1);
         if (destFile) {
-            ++nrImported;
+            importedFiles.append(destFile);
             qDebug() << "imported" << file << "as" << targetFilePath;
         } else {
             VUtils::addErrMsg(p_errMsg, tr("Fail to add the note %1 to target folder's configuration.")
@@ -779,9 +803,11 @@ bool VFileList::importFiles(const QStringList &p_files, QString *p_errMsg)
         }
     }
 
-    qDebug() << "imported" << nrImported << "files";
+    qDebug() << "imported" << importedFiles.size() << "files";
 
     updateFileList();
+
+    selectFiles(importedFiles);
 
     return ret;
 }
@@ -954,10 +980,11 @@ void VFileList::keyPressEvent(QKeyEvent *p_event)
         QListWidgetItem *item = fileList->currentItem();
         if (item) {
             VFile *fileToClose = NULL;
-            if (!(p_event->modifiers() & Qt::ControlModifier)
-                && g_config->getSingleClickClosePreviousTab()) {
-                VFile *file = getVFile(item);
-                Q_ASSERT(file);
+            VFile *file = getVFile(item);
+            Q_ASSERT(file);
+            if (p_event->modifiers() == Qt::NoModifier
+                && g_config->getSingleClickClosePreviousTab()
+                && file->getDocType() != DocType::Unknown) {
                 if (!editArea->isFileOpened(file)) {
                     VEditTab *tab = editArea->getCurrentTab();
                     if (tab) {
@@ -1118,8 +1145,12 @@ void VFileList::sortItems()
     }
 }
 
-void VFileList::initOpenWithMenu()
+QMenu *VFileList::getOpenWithMenu()
 {
+    if (m_openWithMenu) {
+        return m_openWithMenu;
+    }
+
     m_openWithMenu = new QMenu(tr("Open With"), this);
     m_openWithMenu->setToolTipsVisible(true);
 
@@ -1207,6 +1238,8 @@ void VFileList::initOpenWithMenu()
             });
 
     m_openWithMenu->addAction(addAct);
+
+    return m_openWithMenu;
 }
 
 void VFileList::handleOpenWithActionTriggered()
@@ -1235,4 +1268,153 @@ void VFileList::updateNumberLabel() const
     int cnt = fileList->count();
     m_numLabel->setText(tr("%1 %2").arg(cnt)
                                    .arg(cnt > 1 ? tr("Items") : tr("Item")));
+}
+
+void VFileList::updateViewMenu(QMenu *p_menu)
+{
+    if (p_menu->isEmpty()) {
+        QActionGroup *ag = new QActionGroup(p_menu);
+
+        QAction *act = new QAction(tr("View By Configuration File"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::Config);
+        act->setChecked(true);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Name"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::Name);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Name (Reverse)"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::NameReverse);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Created Time"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::CreatedTime);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Created Time (Reverse)"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::CreatedTimeReverse);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Modified Time"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::ModifiedTime);
+        p_menu->addAction(act);
+
+        act = new QAction(tr("View By Modified Time (Reverse)"), ag);
+        act->setCheckable(true);
+        act->setData(ViewOrder::ModifiedTimeReverse);
+        p_menu->addAction(act);
+
+        int config = g_config->getNoteListViewOrder();
+        for (auto act : ag->actions()) {
+            if (act->data().toInt() == config) {
+                act->setChecked(true);
+            }
+        }
+
+        connect(ag, &QActionGroup::triggered,
+                this, [this](QAction *p_action) {
+                    int order = p_action->data().toInt();
+                    g_config->setNoteListViewOrder(order);
+
+                    sortFileList((ViewOrder)order);
+                });
+    }
+}
+
+void VFileList::sortFileList(ViewOrder p_order)
+{
+    QVector<VNoteFile *> files = m_directory->getFiles();
+    sortFiles(files, p_order);
+
+    Q_ASSERT(files.size() == fileList->count());
+    int cnt = files.size();
+    for (int i = 0; i < cnt; ++i) {
+        int row = -1;
+        for (int j = i; j < cnt; ++j) {
+            QListWidgetItem *item = fileList->item(j);
+            if (files[i] == getVFile(item)) {
+                row = j;
+                break;
+            }
+        }
+
+        Q_ASSERT(row > -1);
+        QListWidgetItem *item = fileList->takeItem(row);
+        fileList->insertItem(i, item);
+    }
+}
+
+void VFileList::sortFiles(QVector<VNoteFile *> &p_files, ViewOrder p_order)
+{
+    bool reverse = false;
+
+    switch (p_order) {
+    case ViewOrder::Config:
+        break;
+
+    case ViewOrder::NameReverse:
+        reverse = true;
+        V_FALLTHROUGH;
+    case ViewOrder::Name:
+        std::sort(p_files.begin(), p_files.end(), [reverse](const VNoteFile *p_a, const VNoteFile *p_b) {
+            if (reverse) {
+                return p_b->getName() < p_a->getName();
+            } else {
+                return p_a->getName() < p_b->getName();
+            }
+        });
+        break;
+
+    case ViewOrder::CreatedTimeReverse:
+        reverse = true;
+        V_FALLTHROUGH;
+    case ViewOrder::CreatedTime:
+        std::sort(p_files.begin(), p_files.end(), [reverse](const VNoteFile *p_a, const VNoteFile *p_b) {
+            if (reverse) {
+                return p_b->getCreatedTimeUtc() < p_a->getCreatedTimeUtc();
+            } else {
+                return p_a->getCreatedTimeUtc() < p_b->getCreatedTimeUtc();
+            }
+        });
+        break;
+
+    case ViewOrder::ModifiedTimeReverse:
+        reverse = true;
+        V_FALLTHROUGH;
+    case ViewOrder::ModifiedTime:
+        std::sort(p_files.begin(), p_files.end(), [reverse](const VNoteFile *p_a, const VNoteFile *p_b) {
+            if (reverse) {
+                return p_b->getModifiedTimeUtc() < p_a->getModifiedTimeUtc();
+            } else {
+                return p_a->getModifiedTimeUtc() < p_b->getModifiedTimeUtc();
+            }
+        });
+        break;
+
+    default:
+        break;
+    }
+}
+
+void VFileList::selectFiles(const QVector<VNoteFile *> &p_files)
+{
+    bool first = true;
+    for (auto const & file : p_files) {
+        QListWidgetItem *item = findItem(file);
+        if (item) {
+            if (first) {
+                first = false;
+                fileList->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
+            } else {
+                item->setSelected(true);
+            }
+        }
+    }
 }

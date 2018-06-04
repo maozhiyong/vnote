@@ -57,21 +57,25 @@ struct ExportHTMLOption
     ExportHTMLOption()
         : m_embedCssStyle(true),
           m_completeHTML(true),
+          m_embedImages(true),
           m_mimeHTML(false)
     {
     }
 
     ExportHTMLOption(bool p_embedCssStyle,
                      bool p_completeHTML,
+                     bool p_embedImages,
                      bool p_mimeHTML)
         : m_embedCssStyle(p_embedCssStyle),
           m_completeHTML(p_completeHTML),
+          m_embedImages(p_embedImages),
           m_mimeHTML(p_mimeHTML)
     {
     }
 
     bool m_embedCssStyle;
     bool m_completeHTML;
+    bool m_embedImages;
     bool m_mimeHTML;
 };
 
@@ -163,12 +167,14 @@ struct ExportCustomOption
                        const QString &p_outputSuffix,
                        const QString &p_cmd,
                        const QString &p_cssUrl,
+                       const QString &p_codeBlockCssUrl,
                        bool p_allInOne,
                        const QString &p_folderSep,
                        const QString &p_targetFileName)
         : m_srcFormat(p_srcFormat),
           m_outputSuffix(p_outputSuffix),
           m_cssUrl(p_cssUrl),
+          m_codeBlockCssUrl(p_codeBlockCssUrl),
           m_allInOne(p_allInOne),
           m_folderSep(p_folderSep),
           m_targetFileName(p_targetFileName)
@@ -194,6 +200,8 @@ struct ExportCustomOption
     QString m_cmd;
 
     QString m_cssUrl;
+    QString m_codeBlockCssUrl;
+
     bool m_allInOne;
 
     QString m_folderSep;
@@ -409,6 +417,8 @@ private:
 
     QPushButton *m_exportBtn;
 
+    QPushButton *m_copyBtn;
+
     QLabel *m_layoutLabel;
 
     QCheckBox *m_wkhtmltopdfCB;
@@ -431,7 +441,9 @@ private:
 
     QCheckBox *m_embedStyleCB;
 
-    QCheckBox *m_completeHTMLCB;;
+    QCheckBox *m_completeHTMLCB;
+
+    QCheckBox *m_embedImagesCB;
 
     QCheckBox *m_mimeHTMLCB;
 
@@ -469,6 +481,9 @@ private:
 
     // Exporter used to export PDF and HTML.
     VExporter *m_exporter;
+
+    // Last exproted file path.
+    QString m_exportedFile;
 
     // Last output folder path.
     static QString s_lastOutputFolder;

@@ -174,13 +174,12 @@ static QString evaluateCommand(const ExportCustomOption &p_opt,
                                const QString &p_inputFolder,
                                const QString &p_output)
 {
-    QString cssStyle = QDir::toNativeSeparators(p_opt.m_cssUrl);
-
     QString cmd(p_opt.m_cmd);
     replaceArgument(cmd, "%0", p_input);
     replaceArgument(cmd, "%1", p_output);
-    replaceArgument(cmd, "%2", cssStyle);
+    replaceArgument(cmd, "%2", QDir::toNativeSeparators(p_opt.m_cssUrl));
     replaceArgument(cmd, "%3", p_inputFolder);
+    replaceArgument(cmd, "%4", QDir::toNativeSeparators(p_opt.m_codeBlockCssUrl));
 
     return cmd;
 }
@@ -336,7 +335,8 @@ bool VExporter::exportToPDFViaWK(VDocument *p_webDocument,
                                       p_styleContent,
                                       p_bodyContent,
                                       true,
-                                      true)) {
+                                      true,
+                                      false)) {
                     pdfExported = -1;
                     return;
                 }
@@ -395,7 +395,8 @@ bool VExporter::exportToCustom(VDocument *p_webDocument,
                                       p_styleContent,
                                       p_bodyContent,
                                       true,
-                                      true)) {
+                                      true,
+                                      false)) {
                     exported = -1;
                     return;
                 }
@@ -561,7 +562,8 @@ bool VExporter::exportToHTML(VDocument *p_webDocument,
                                       p_styleContent,
                                       p_bodyContent,
                                       p_opt.m_embedCssStyle,
-                                      p_opt.m_completeHTML)) {
+                                      p_opt.m_completeHTML,
+                                      p_opt.m_embedImages)) {
                     htmlExported = -1;
                     return;
                 }
@@ -610,6 +612,33 @@ bool VExporter::fixStyleResources(const QString &p_folder,
     return altered;
 }
 
+bool VExporter::embedStyleResources(QString &p_html)
+{
+    bool altered = false;
+    QRegExp reg("\\burl\\(\"((file|qrc):[^\"\\)]+)\"\\);");
+
+    int pos = 0;
+    while (pos < p_html.size()) {
+        int idx = p_html.indexOf(reg, pos);
+        if (idx == -1) {
+            break;
+        }
+
+        QString dataURI = g_webUtils->dataURI(QUrl(reg.cap(1)), false);
+        if (dataURI.isEmpty()) {
+            pos = idx + reg.matchedLength();
+        } else {
+            // Replace the url string in html.
+            QString newUrl = QString("url('%1');").arg(dataURI);
+            p_html.replace(idx, reg.matchedLength(), newUrl);
+            pos = idx + newUrl.size();
+            altered = true;
+        }
+    }
+
+    return altered;
+}
+
 bool VExporter::fixBodyResources(const QUrl &p_baseUrl,
                                  const QString &p_folder,
                                  QString &p_html)
@@ -642,6 +671,45 @@ bool VExporter::fixBodyResources(const QUrl &p_baseUrl,
             QString newUrl = QString("<img %1src=\"%2\"%3>").arg(reg.cap(1))
                                                             .arg(getResourceRelativePath(targetFile))
                                                             .arg(reg.cap(3));
+            p_html.replace(idx, reg.matchedLength(), newUrl);
+            pos = idx + newUrl.size();
+            altered = true;
+        }
+    }
+
+    return altered;
+}
+
+bool VExporter::embedBodyResources(const QUrl &p_baseUrl, QString &p_html)
+{
+    bool altered = false;
+    if (p_baseUrl.isEmpty()) {
+        return altered;
+    }
+
+    QRegExp reg("<img ([^>]*)src=\"([^\"]+)\"([^>]*)>");
+
+    int pos = 0;
+    while (pos < p_html.size()) {
+        int idx = p_html.indexOf(reg, pos);
+        if (idx == -1) {
+            break;
+        }
+
+        if (reg.cap(2).isEmpty()) {
+            pos = idx + reg.matchedLength();
+            continue;
+        }
+
+        QUrl srcUrl(p_baseUrl.resolved(reg.cap(2)));
+        QString dataURI = g_webUtils->dataURI(srcUrl);
+        if (dataURI.isEmpty()) {
+            pos = idx + reg.matchedLength();
+        } else {
+            // Replace the url string in html.
+            QString newUrl = QString("<img %1src='%2'%3>").arg(reg.cap(1))
+                                                          .arg(dataURI)
+                                                          .arg(reg.cap(3));
             p_html.replace(idx, reg.matchedLength(), newUrl);
             pos = idx + newUrl.size();
             altered = true;
@@ -901,7 +969,8 @@ bool VExporter::outputToHTMLFile(const QString &p_file,
                                  const QString &p_styleContent,
                                  const QString &p_bodyContent,
                                  bool p_embedCssStyle,
-                                 bool p_completeHTML)
+                                 bool p_completeHTML,
+                                 bool p_embedImages)
 {
     QFile file(p_file);
     if (!file.open(QFile::WriteOnly)) {
@@ -916,7 +985,7 @@ bool VExporter::outputToHTMLFile(const QString &p_file,
     QString html(m_exportHtmlTemplate);
     if (!p_styleContent.isEmpty() && p_embedCssStyle) {
         QString content(p_styleContent);
-        fixStyleResources(resFolderPath, content);
+        embedStyleResources(content);
         html.replace(HtmlHolder::c_styleHolder, content);
     }
 
@@ -926,7 +995,12 @@ bool VExporter::outputToHTMLFile(const QString &p_file,
 
     if (p_completeHTML) {
         QString content(p_bodyContent);
-        fixBodyResources(m_baseUrl, resFolderPath, content);
+        if (p_embedImages) {
+            embedBodyResources(m_baseUrl, content);
+        } else {
+            fixBodyResources(m_baseUrl, resFolderPath, content);
+        }
+
         html.replace(HtmlHolder::c_bodyHolder, content);
     } else {
         html.replace(HtmlHolder::c_bodyHolder, p_bodyContent);

@@ -7,9 +7,9 @@
 #include "utils/viconutils.h"
 #include "vnote.h"
 #include "vmainwindow.h"
-#include "vnotebookselector.h"
 #include "vnotefile.h"
 #include "vcart.h"
+#include "vhistorylist.h"
 
 extern VNote *g_vnote;
 
@@ -54,10 +54,19 @@ void VSearchResultTree::initActions()
     connect(m_locateAct, &QAction::triggered,
             this, &VSearchResultTree::locateCurrentItem);
 
-    m_addToCartAct = new QAction(tr("Add To Cart"), this);
+    m_addToCartAct = new QAction(VIconUtils::menuIcon(":/resources/icons/cart.svg"),
+                                 tr("Add To Cart"),
+                                 this);
     m_addToCartAct->setToolTip(tr("Add selected notes to Cart for further processing"));
     connect(m_addToCartAct, &QAction::triggered,
             this, &VSearchResultTree::addSelectedItemsToCart);
+
+    m_pinToHistoryAct = new QAction(VIconUtils::menuIcon(":/resources/icons/pin.svg"),
+                                    tr("Pin To History"),
+                                    this);
+    m_pinToHistoryAct->setToolTip(tr("Pin selected notes to History"));
+    connect(m_pinToHistoryAct, &QAction::triggered,
+            this, &VSearchResultTree::pinSelectedItemsToHistory);
 }
 
 void VSearchResultTree::updateResults(const QList<QSharedPointer<VSearchResultItem> > &p_items)
@@ -166,6 +175,7 @@ void VSearchResultTree::handleContextMenuRequested(QPoint p_pos)
 
     if (hasNote) {
         menu.addAction(m_addToCartAct);
+        menu.addAction(m_pinToHistoryAct);
     }
 
     menu.exec(mapToGlobal(p_pos));
@@ -205,6 +215,25 @@ void VSearchResultTree::addSelectedItemsToCart()
         g_mainWin->showStatusMessage(tr("%1 %2 added to Cart")
                                        .arg(nrAdded)
                                        .arg(nrAdded > 1 ? tr("notes") : tr("note")));
+    }
+}
+
+void VSearchResultTree::pinSelectedItemsToHistory()
+{
+    QList<QTreeWidgetItem *> items = selectedItems();
+    QStringList files;
+    for (int i = 0; i < items.size(); ++i) {
+        const QSharedPointer<VSearchResultItem> &resItem = itemResultData(items[i]);
+        if (resItem->m_type == VSearchResultItem::Note) {
+            files << resItem->m_path;
+        }
+    }
+
+    if (!files.isEmpty()) {
+        g_mainWin->getHistoryList()->pinFiles(files);
+        g_mainWin->showStatusMessage(tr("%1 %2 pinned to History")
+                                       .arg(files.size())
+                                       .arg(files.size() > 1 ? tr("notes") : tr("note")));
     }
 }
 
@@ -252,7 +281,7 @@ void VSearchResultTree::activateItem(const QTreeWidgetItem *p_item) const
     {
         VNotebook *nb = g_vnote->getNotebook(resItem->m_path);
         if (nb) {
-            g_mainWin->getNotebookSelector()->locateNotebook(nb);
+            g_mainWin->locateNotebook(nb);
         }
 
         break;

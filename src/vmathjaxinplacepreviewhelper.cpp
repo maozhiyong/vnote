@@ -19,58 +19,33 @@ MathjaxBlockPreviewInfo::MathjaxBlockPreviewInfo(const VMathjaxBlock &p_mb)
 {
 }
 
-void MathjaxBlockPreviewInfo::updateNonContent(const QTextDocument *p_doc,
-                                               const VEditor *p_editor,
-                                               const VMathjaxBlock &p_mb)
-{
-    m_mathjaxBlock.updateNonContent(p_mb);
-    if (m_inplacePreview.isNull()) {
-        return;
-    }
-
-    QTextBlock block = p_doc->findBlockByNumber(m_mathjaxBlock.m_blockNumber);
-    if (block.isValid()) {
-        m_inplacePreview->m_startPos = block.position() + m_mathjaxBlock.m_index;
-        m_inplacePreview->m_endPos = m_inplacePreview->m_startPos + m_mathjaxBlock.m_length;
-        m_inplacePreview->m_blockPos = block.position();
-        m_inplacePreview->m_blockNumber = m_mathjaxBlock.m_blockNumber;
-        // Padding may changed.
-        m_inplacePreview->m_padding = VPreviewManager::calculateBlockMargin(block,
-                                                                            p_editor->tabStopWidthW());
-        m_inplacePreview->m_isBlock = m_mathjaxBlock.m_previewedAsBlock;
-    } else {
-        m_inplacePreview->clear();
-    }
-}
-
 void MathjaxBlockPreviewInfo::updateInplacePreview(const VEditor *p_editor,
-                                                   const QTextDocument *p_doc)
+                                                   const QTextDocument *p_doc,
+                                                   const QPixmap &p_image)
 {
     QTextBlock block = p_doc->findBlockByNumber(m_mathjaxBlock.m_blockNumber);
     if (block.isValid()) {
-        if (m_inplacePreview.isNull()) {
-            m_inplacePreview.reset(new VImageToPreview());
-        }
+        VImageToPreview *preview = new VImageToPreview();
 
-        m_inplacePreview->m_startPos = block.position() + m_mathjaxBlock.m_index;
-        m_inplacePreview->m_endPos = m_inplacePreview->m_startPos + m_mathjaxBlock.m_length;
-        m_inplacePreview->m_blockPos = block.position();
-        m_inplacePreview->m_blockNumber = m_mathjaxBlock.m_blockNumber;
-        m_inplacePreview->m_padding = VPreviewManager::calculateBlockMargin(block,
-                                                                            p_editor->tabStopWidthW());
-        m_inplacePreview->m_name = QString::number(getImageIndex());
-        m_inplacePreview->m_isBlock = m_mathjaxBlock.m_previewedAsBlock;
+        preview->m_startPos = block.position() + m_mathjaxBlock.m_index;
+        preview->m_endPos = preview->m_startPos + m_mathjaxBlock.m_length;
+        preview->m_blockPos = block.position();
+        preview->m_blockNumber = m_mathjaxBlock.m_blockNumber;
+        preview->m_padding = VPreviewManager::calculateBlockMargin(block,
+                                                                   p_editor->tabStopWidthW());
+        preview->m_name = QString::number(getImageIndex());
+        preview->m_isBlock = m_mathjaxBlock.m_previewedAsBlock;
 
-        if (hasImageDataBa()) {
-            m_inplacePreview->m_image.loadFromData(m_imgDataBa,
-                                                   m_imgFormat.toLocal8Bit().data());
-        } else {
-            m_inplacePreview->m_image = QPixmap();
-        }
+        preview->m_image = p_image;
+
+        m_inplacePreview.reset(preview);
     } else {
-        m_inplacePreview->clear();
+        m_inplacePreview.clear();
     }
 }
+
+#define MATHJAX_IMAGE_CACHE_SIZE_DIFF 20
+#define MATHJAX_IMAGE_CACHE_TIME_DIFF 5
 
 VMathJaxInplacePreviewHelper::VMathJaxInplacePreviewHelper(VEditor *p_editor,
                                                            VDocument *p_document,
@@ -100,6 +75,7 @@ void VMathJaxInplacePreviewHelper::setEnabled(bool p_enabled)
 
         if (!m_enabled) {
             m_mathjaxBlocks.clear();
+            m_cache.clear();
         }
 
         updateInplacePreview();
@@ -114,34 +90,35 @@ void VMathJaxInplacePreviewHelper::updateMathjaxBlocks(const QVector<VMathjaxBlo
 
     ++m_timeStamp;
 
-    int idx = 0;
+    m_mathjaxBlocks.clear();
+    m_mathjaxBlocks.reserve(p_blocks.size());
     bool manualUpdate = true;
-    for (auto const & vmb : p_blocks) {
-        if (idx < m_mathjaxBlocks.size()) {
-            MathjaxBlockPreviewInfo &mb = m_mathjaxBlocks[idx];
-            if (mb.mathjaxBlock().equalContent(vmb)) {
-                mb.updateNonContent(m_doc, m_editor, vmb);
-            } else {
-                mb.setMathjaxBlock(vmb);
-            }
-        } else {
-            m_mathjaxBlocks.append(MathjaxBlockPreviewInfo(vmb));
+    for (int i = 0; i < p_blocks.size(); ++i) {
+        const VMathjaxBlock &vmb = p_blocks[i];
+        const QString &text = vmb.m_text;
+        bool cached = false;
+
+        m_mathjaxBlocks.append(MathjaxBlockPreviewInfo(vmb));
+
+        auto it = m_cache.find(text);
+        if (it != m_cache.end()) {
+            QSharedPointer<MathjaxImageCacheEntry> &entry = it.value();
+            entry->m_ts = m_timeStamp;
+            cached = true;
+            m_mathjaxBlocks.last().updateInplacePreview(m_editor, m_doc, entry->m_image);
         }
 
-        if (m_enabled
-            && !m_mathjaxBlocks[idx].inplacePreviewReady()) {
+        if (!cached || !m_mathjaxBlocks.last().inplacePreviewReady()) {
             manualUpdate = false;
-            processForInplacePreview(idx);
+            processForInplacePreview(m_mathjaxBlocks.size() - 1);
         }
-
-        ++idx;
     }
-
-    m_mathjaxBlocks.resize(idx);
 
     if (manualUpdate) {
         updateInplacePreview();
     }
+
+    clearObsoleteCache();
 }
 
 void VMathJaxInplacePreviewHelper::processForInplacePreview(int p_idx)
@@ -151,27 +128,23 @@ void VMathJaxInplacePreviewHelper::processForInplacePreview(int p_idx)
     if (vmb.m_text.isEmpty()) {
         updateInplacePreview();
     } else {
-        textToHtmlViaWebView(vmb.m_text, p_idx, m_timeStamp);
+        if (!textToHtmlViaWebView(vmb.m_text, p_idx, m_timeStamp)) {
+            updateInplacePreview();
+        }
     }
 }
 
-void VMathJaxInplacePreviewHelper::textToHtmlViaWebView(const QString &p_text,
+bool VMathJaxInplacePreviewHelper::textToHtmlViaWebView(const QString &p_text,
                                                         int p_id,
                                                         int p_timeStamp)
 {
-    int maxRetry = 50;
-    while (!m_document->isReadyToTextToHtml() && maxRetry > 0) {
-        qDebug() << "wait for web side ready to convert text to HTML";
-        VUtils::sleepWait(100);
-        --maxRetry;
-    }
-
-    if (maxRetry == 0) {
-        qWarning() << "web side is not ready to convert text to HTML";
-        return;
+    if (!m_document->isReadyToTextToHtml()) {
+        qDebug() << "web side is not ready to convert text to HTML";
+        return false;
     }
 
     m_document->textToHtmlAsync(m_documentID, p_id, p_timeStamp, p_text, false);
+    return true;
 }
 
 void VMathJaxInplacePreviewHelper::updateInplacePreview()
@@ -220,8 +193,13 @@ void VMathJaxInplacePreviewHelper::mathjaxPreviewResultReady(int p_identitifer,
     }
 
     MathjaxBlockPreviewInfo &mb = m_mathjaxBlocks[p_id];
-    mb.setImageDataBa(p_format, p_data);
-    mb.updateInplacePreview(m_editor, m_doc);
+    // Update the cache.
+    QSharedPointer<MathjaxImageCacheEntry> entry(new MathjaxImageCacheEntry(p_timeStamp,
+                                                                            p_data,
+                                                                            p_format));
+    m_cache.insert(mb.mathjaxBlock().m_text, entry);
+    mb.updateInplacePreview(m_editor, m_doc, entry->m_image);
+
     updateInplacePreview();
 }
 
@@ -230,7 +208,7 @@ void VMathJaxInplacePreviewHelper::textToHtmlFinished(int p_identitifer,
                                                       int p_timeStamp,
                                                       const QString &p_html)
 {
-    if (m_documentID != p_identitifer || m_timeStamp != (TS)p_timeStamp) {
+    if (m_documentID != p_identitifer || m_timeStamp != (TimeStamp)p_timeStamp) {
         return;
     }
 
@@ -239,4 +217,20 @@ void VMathJaxInplacePreviewHelper::textToHtmlFinished(int p_identitifer,
                                             p_id,
                                             p_timeStamp,
                                             p_html);
+}
+
+void VMathJaxInplacePreviewHelper::clearObsoleteCache()
+{
+    if (m_cache.size() - m_mathjaxBlocks.size() <= MATHJAX_IMAGE_CACHE_SIZE_DIFF) {
+        return;
+    }
+
+    for (auto it = m_cache.begin(); it != m_cache.end();) {
+        if (m_timeStamp - it.value()->m_ts > MATHJAX_IMAGE_CACHE_TIME_DIFF) {
+            it.value().clear();
+            it = m_cache.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }

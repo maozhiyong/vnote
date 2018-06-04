@@ -5,7 +5,6 @@
 #include <QPainter>
 #include <QResizeEvent>
 
-#include "vtextdocumentlayout.h"
 #include "vimageresourcemanager2.h"
 
 #define VIRTUAL_CURSOR_BLOCK_WIDTH 8
@@ -278,12 +277,35 @@ void VTextEdit::updateLineNumberArea()
     }
 }
 
+int VTextEdit::firstVisibleBlockNumber() const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    return layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
+}
+
 QTextBlock VTextEdit::firstVisibleBlock() const
 {
     VTextDocumentLayout *layout = getLayout();
     Q_ASSERT(layout);
     int blockNumber = layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
     return document()->findBlockByNumber(blockNumber);
+}
+
+QTextBlock VTextEdit::lastVisibleBlock() const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    int blockNumber = layout->findBlockByPosition(QPointF(0, -contentOffsetY() + contentsRect().height()));
+    return document()->findBlockByNumber(blockNumber);
+}
+
+void VTextEdit::visibleBlockRange(int &p_first, int &p_last) const
+{
+    VTextDocumentLayout *layout = getLayout();
+    Q_ASSERT(layout);
+    p_first = layout->findBlockByPosition(QPointF(0, -contentOffsetY()));
+    p_last = layout->findBlockByPosition(QPointF(0, -contentOffsetY() + contentsRect().height()));
 }
 
 int VTextEdit::contentOffsetY() const
@@ -299,9 +321,26 @@ void VTextEdit::clearBlockImages()
     getLayout()->relayout();
 }
 
-void VTextEdit::relayout(const QSet<int> &p_blocks)
+void VTextEdit::relayout(const OrderedIntSet &p_blocks)
 {
     getLayout()->relayout(p_blocks);
+
+    updateLineNumberArea();
+}
+
+void VTextEdit::relayoutVisibleBlocks()
+{
+    int first, last;
+    visibleBlockRange(first, last);
+    OrderedIntSet blocks;
+
+    for (int i = first; i <= last; ++i) {
+        blocks.insert(i, QMapDummyValue());
+    }
+
+    getLayout()->relayout(blocks);
+
+    updateLineNumberArea();
 }
 
 bool VTextEdit::containsImage(const QString &p_imageName) const
@@ -391,6 +430,8 @@ void VTextEdit::setCursorLineBlockBg(const QColor &p_bg)
 void VTextEdit::relayout()
 {
     getLayout()->relayout();
+
+    updateLineNumberArea();
 }
 
 void VTextEdit::setDisplayScaleFactor(qreal p_factor)

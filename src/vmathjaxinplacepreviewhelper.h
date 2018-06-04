@@ -19,17 +19,9 @@ public:
 
     explicit MathjaxBlockPreviewInfo(const VMathjaxBlock &p_mb);
 
-    void clearImageData()
-    {
-        m_imgDataBa.clear();
-        m_inplacePreview.clear();
-    }
-
-    void updateNonContent(const QTextDocument *p_doc,
-                          const VEditor *p_editor,
-                          const VMathjaxBlock &p_mb);
-
-    void updateInplacePreview(const VEditor *p_editor, const QTextDocument *p_doc);
+    void updateInplacePreview(const VEditor *p_editor,
+                              const QTextDocument *p_doc,
+                              const QPixmap &p_image);
 
     VMathjaxBlock &mathjaxBlock()
     {
@@ -41,26 +33,9 @@ public:
         return m_mathjaxBlock;
     }
 
-    void setMathjaxBlock(const VMathjaxBlock &p_mb)
-    {
-        m_mathjaxBlock = p_mb;
-        clearImageData();
-    }
-
     bool inplacePreviewReady() const
     {
         return !m_inplacePreview.isNull();
-    }
-
-    void setImageDataBa(const QString &p_format, const QByteArray &p_data)
-    {
-        m_imgFormat = p_format;
-        m_imgDataBa = p_data;
-    }
-
-    bool hasImageDataBa() const
-    {
-        return !m_imgDataBa.isEmpty();
     }
 
     const QSharedPointer<VImageToPreview> inplacePreview() const
@@ -77,12 +52,9 @@ private:
 
     VMathjaxBlock m_mathjaxBlock;
 
-    QByteArray m_imgDataBa;
-
-    QString m_imgFormat;
-
     QSharedPointer<VImageToPreview> m_inplacePreview;
 };
+
 
 class VMathJaxInplacePreviewHelper : public QObject
 {
@@ -112,14 +84,38 @@ private slots:
     void textToHtmlFinished(int p_identitifer, int p_id, int p_timeStamp, const QString &p_html);
 
 private:
+    struct MathjaxImageCacheEntry
+    {
+        MathjaxImageCacheEntry()
+            : m_ts(0)
+        {
+        }
+
+        MathjaxImageCacheEntry(TimeStamp p_ts,
+                               const QByteArray &p_dataBa,
+                               const QString &p_format)
+            : m_ts(p_ts)
+        {
+            if (!p_dataBa.isEmpty()) {
+                m_image.loadFromData(p_dataBa, p_format.toLocal8Bit().data());
+            }
+        }
+
+        TimeStamp m_ts;
+        QPixmap m_image;
+    };
+
+
     void processForInplacePreview(int p_idx);
 
     // Emit signal to update inplace preview.
     void updateInplacePreview();
 
-    void textToHtmlViaWebView(const QString &p_text,
+    bool textToHtmlViaWebView(const QString &p_text,
                               int p_id,
                               int p_timeStamp);
+
+    void clearObsoleteCache();
 
     VEditor *m_editor;
 
@@ -142,6 +138,9 @@ private:
     QVector<MathjaxBlockPreviewInfo> m_mathjaxBlocks;
 
     int m_documentID;
+
+    // Indexed by content.
+    QHash<QString, QSharedPointer<MathjaxImageCacheEntry>> m_cache;
 };
 
 #endif // VMATHJAXINPLACEPREVIEWHELPER_H

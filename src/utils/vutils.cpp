@@ -26,6 +26,8 @@
 #include <QWebEngineView>
 #include <QAction>
 #include <QTreeWidgetItem>
+#include <QFormLayout>
+#include <QInputDialog>
 
 #include "vorphanfile.h"
 #include "vnote.h"
@@ -37,7 +39,10 @@ extern VConfigManager *g_config;
 
 QVector<QPair<QString, QString>> VUtils::s_availableLanguages;
 
-const QString VUtils::c_imageLinkRegExp = QString("\\!\\[([^\\]]*)\\]\\(([^\\)\"]+)\\s*(\"(\\\\.|[^\"\\)])*\")?\\s*\\)");
+const QString VUtils::c_imageLinkRegExp = QString("\\!\\[([^\\]]*)\\]\\(([^\\)\"'\\s]+)\\s*"
+                                                  "((\"[^\"\\)\\n]*\")|('[^'\\)\\n]*'))?\\s*"
+                                                  "(=(\\d*)x(\\d*))?\\s*"
+                                                  "\\)");
 
 const QString VUtils::c_imageTitleRegExp = QString("[\\w\\(\\)@#%\\*\\-\\+=\\?<>\\,\\.\\s]*");
 
@@ -653,6 +658,7 @@ QString VUtils::generateHtmlTemplate(const QString &p_template,
         extraFile = "<script src=\"qrc" + VNote::c_markdownitExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitAnchorExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitTaskListExtraFile + "\"></script>\n" +
+                    "<script src=\"qrc" + VNote::c_markdownitImsizeExtraFile + "\"></script>\n" +
                     "<script src=\"qrc" + VNote::c_markdownitFootnoteExtraFile + "\"></script>\n";
 
         const MarkdownitOption &opt = g_config->getMarkdownitOption();
@@ -665,18 +671,30 @@ QString VUtils::generateHtmlTemplate(const QString &p_template,
             extraFile += "<script src=\"qrc" + VNote::c_markdownitSubExtraFile + "\"></script>\n";
         }
 
+        if (opt.m_metadata) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitFrontMatterExtraFile + "\"></script>\n";
+        }
+
+        if (opt.m_emoji) {
+            extraFile += "<script src=\"qrc" + VNote::c_markdownitEmojiExtraFile + "\"></script>\n";
+        }
+
         QString optJs = QString("<script>var VMarkdownitOption = {"
                                 "html: %1,\n"
                                 "breaks: %2,\n"
                                 "linkify: %3,\n"
                                 "sub: %4,\n"
-                                "sup: %5 };\n"
+                                "sup: %5,\n"
+                                "metadata: %6,\n"
+                                "emoji: %7 };\n"
                                 "</script>\n")
                                .arg(opt.m_html ? QStringLiteral("true") : QStringLiteral("false"))
                                .arg(opt.m_breaks ? QStringLiteral("true") : QStringLiteral("false"))
                                .arg(opt.m_linkify ? QStringLiteral("true") : QStringLiteral("false"))
                                .arg(opt.m_sub ? QStringLiteral("true") : QStringLiteral("false"))
-                               .arg(opt.m_sup ? QStringLiteral("true") : QStringLiteral("false"));
+                               .arg(opt.m_sup ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_metadata ? QStringLiteral("true") : QStringLiteral("false"))
+                               .arg(opt.m_emoji ? QStringLiteral("true") : QStringLiteral("false"));
         extraFile += optJs;
         break;
     }
@@ -775,6 +793,14 @@ QString VUtils::generateHtmlTemplate(const QString &p_template,
     }
 
     extraFile += "<script>var VStylesToInline = '" + g_config->getStylesToInlineWhenCopied() + "';</script>\n";
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    extraFile += "<script>var VOS = 'mac';</script>\n";
+#elif defined(Q_OS_WIN)
+    extraFile += "<script>var VOS = 'win';</script>\n";
+#else
+    extraFile += "<script>var VOS = 'linux';</script>\n";
+#endif
 
     QString htmlTemplate(p_template);
     htmlTemplate.replace(HtmlHolder::c_JSHolder, jsFile);
@@ -1019,8 +1045,6 @@ bool VUtils::splitPathInBasePath(const QString &p_base,
     }
 
     p_parts = b.right(b.size() - a.size() - 1).split("/", QString::SkipEmptyParts);
-
-    qDebug() << QString("split path %1 based on %2 to %3 parts").arg(p_path).arg(p_base).arg(p_parts.size());
     return true;
 }
 
@@ -1469,4 +1493,140 @@ const QTreeWidgetItem *VUtils::topLevelTreeItem(const QTreeWidgetItem *p_item)
     } else {
         return p_item;
     }
+}
+
+QImage VUtils::imageFromFile(const QString &p_filePath)
+{
+    QImage img;
+    QFile file(p_filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "fail to open image file" << p_filePath;
+        return img;
+    }
+
+    img.loadFromData(file.readAll());
+    qDebug() << "imageFromFile" << p_filePath << img.isNull() << img.format();
+    return img;
+}
+
+QPixmap VUtils::pixmapFromFile(const QString &p_filePath)
+{
+    QPixmap pixmap;
+    QFile file(p_filePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "fail to open pixmap file" << p_filePath;
+        return pixmap;
+    }
+
+    pixmap.loadFromData(file.readAll());
+    qDebug() << "pixmapFromFile" << p_filePath << pixmap.isNull();
+    return pixmap;
+}
+
+QFormLayout *VUtils::getFormLayout()
+{
+    QFormLayout *layout = new QFormLayout();
+
+#if defined(Q_OS_MACOS) || defined(Q_OS_MAC)
+    layout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    layout->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+#endif
+
+    return layout;
+}
+
+bool VUtils::inSameDrive(const QString &p_a, const QString &p_b)
+{
+#if defined(Q_OS_WIN)
+    QChar sep(':');
+    int ai = p_a.indexOf(sep);
+    int bi = p_b.indexOf(sep);
+
+    if (ai == -1 || bi == -1) {
+        return false;
+    }
+
+    return p_a.left(ai).toLower() == p_b.left(bi).toLower();
+#else
+    return true;
+#endif
+}
+
+QString VUtils::promptForFileName(const QString &p_title,
+                                  const QString &p_label,
+                                  const QString &p_default,
+                                  const QString &p_dir,
+                                  QWidget *p_parent)
+{
+    QString name = p_default;
+    QString text = p_label;
+    QDir paDir(p_dir);
+    while (true) {
+        bool ok;
+        name = QInputDialog::getText(p_parent,
+                                     p_title,
+                                     text,
+                                     QLineEdit::Normal,
+                                     name,
+                                     &ok);
+        if (!ok || name.isEmpty()) {
+            return "";
+        }
+
+        if (!VUtils::checkFileNameLegal(name)) {
+            text = QObject::tr("Illegal name. Please try again:");
+            continue;
+        }
+
+        if (paDir.exists(name)) {
+            text = QObject::tr("Name already exists. Please try again:");
+            continue;
+        }
+
+        break;
+    }
+
+    return name;
+}
+
+QString VUtils::promptForFileName(const QString &p_title,
+                                  const QString &p_label,
+                                  const QString &p_default,
+                                  std::function<bool(const QString &p_name)> p_checkExistsFunc,
+                                  QWidget *p_parent)
+{
+    QString name = p_default;
+    QString text = p_label;
+    while (true) {
+        bool ok;
+        name = QInputDialog::getText(p_parent,
+                                     p_title,
+                                     text,
+                                     QLineEdit::Normal,
+                                     name,
+                                     &ok);
+        if (!ok || name.isEmpty()) {
+            return "";
+        }
+
+        if (!VUtils::checkFileNameLegal(name)) {
+            text = QObject::tr("Illegal name. Please try again:");
+            continue;
+        }
+
+        if (p_checkExistsFunc(name)) {
+            text = QObject::tr("Name already exists. Please try again:");
+            continue;
+        }
+
+        break;
+    }
+
+    return name;
+}
+
+bool VUtils::onlyHasImgInHtml(const QString &p_html)
+{
+    // Tricky.
+    return !p_html.contains("<p ");
 }

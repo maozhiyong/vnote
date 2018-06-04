@@ -8,6 +8,8 @@
 #include <QMessageBox>
 #include <QUrl>
 #include <QDir>
+#include <functional>
+
 #include "vconfigmanager.h"
 #include "vconstants.h"
 
@@ -20,6 +22,7 @@ class QComboBox;
 class QWebEngineView;
 class QAction;
 class QTreeWidgetItem;
+class QFormLayout;
 
 #if !defined(V_ASSERT)
     #define V_ASSERT(cond) ((!(cond)) ? qt_assert(#cond, __FILE__, __LINE__) : qt_noop())
@@ -320,13 +323,44 @@ public:
 
     static const QTreeWidgetItem *topLevelTreeItem(const QTreeWidgetItem *p_item);
 
+    // Read QImage from local file @p_filePath.
+    // Directly calling QImage(p_filePath) will judge the image format from the suffix,
+    // resulting a null image in wrong suffix case.
+    static QImage imageFromFile(const QString &p_filePath);
+
+    static QPixmap pixmapFromFile(const QString &p_filePath);
+
+    // Return QFormLayout.
+    static QFormLayout *getFormLayout();
+
+    static bool inSameDrive(const QString &p_a, const QString &p_b);
+
+    static QString promptForFileName(const QString &p_title,
+                                     const QString &p_label,
+                                     const QString &p_default,
+                                     const QString &p_dir,
+                                     QWidget *p_parent = nullptr);
+
+    static QString promptForFileName(const QString &p_title,
+                                     const QString &p_label,
+                                     const QString &p_default,
+                                     std::function<bool(const QString &p_name)> p_checkExistsFunc,
+                                     QWidget *p_parent = nullptr);
+
+    // Whether @p_html has only <img> content.
+    static bool onlyHasImgInHtml(const QString &p_html);
+
     // Regular expression for image link.
-    // ![image title]( http://github.com/tamlok/vnote.jpg "alt \" text" )
+    // ![image title]( http://github.com/tamlok/vnote.jpg "alt text" =200x100)
     // Captured texts (need to be trimmed):
     // 1. Image Alt Text (Title);
     // 2. Image URL;
-    // 3. Image Optional Title with double quotes;
+    // 3. Image Optional Title with double quotes or quotes;
     // 4. Unused;
+    // 5. Unused;
+    // 6. Unused;
+    // 7. Width;
+    // 8. Height;
     static const QString c_imageLinkRegExp;
 
     // Regular expression for image title.

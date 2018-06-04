@@ -9,6 +9,8 @@
 #include <QStringList>
 #include <QDir>
 #include <QSslSocket>
+#include <QOpenGLContext>
+
 #include "utils/vutils.h"
 #include "vsingleinstanceguard.h"
 #include "vconfigmanager.h"
@@ -125,6 +127,10 @@ int main(int argc, char *argv[])
         QTextCodec::setCodecForLocale(codec);
     }
 
+    // Set openGL version.
+    // Or set environment QT_OPENGL to "angle/desktop/software".
+    // QCoreApplication::setAttribute(Qt::AA_UseOpenGLES, true);
+
     QApplication app(argc, argv);
 
     // The file path passed via command line arguments.
@@ -145,10 +151,14 @@ int main(int argc, char *argv[])
     vconfig.initialize();
     g_config = &vconfig;
 
+    bool checkSSL = true;
+
 #if defined(QT_NO_DEBUG)
+    checkSSL = false;
     for (int i = 1; i < argc; ++i) {
         if (!qstrcmp(argv[i], "-d")) {
             g_debugLog = true;
+            checkSSL = true;
             break;
         }
     }
@@ -168,8 +178,12 @@ int main(int argc, char *argv[])
     qDebug() << "files to open from arguments" << filePaths;
 
     // Check the openSSL.
-    qDebug() << "openSSL" << QSslSocket::sslLibraryBuildVersionString()
-             << QSslSocket::sslLibraryVersionNumber();
+    if (checkSSL) {
+        qDebug() << "openGL" << QOpenGLContext::openGLModuleType();
+        qDebug() << "openSSL"
+                 << QSslSocket::sslLibraryBuildVersionString()
+                 << QSslSocket::sslLibraryVersionNumber();
+    }
 
     // Load missing translation for Qt (QTextEdit/QPlainTextEdit/QTextBrowser).
     QTranslator qtTranslator1;
@@ -216,13 +230,7 @@ int main(int argc, char *argv[])
 
     w.show();
 
-    w.checkNotebooks();
-
-    w.promptNewNotebookIfEmpty();
-
-    w.openStartupPages();
-
-    w.openFiles(filePaths);
+    w.kickOffStartUpTimer(filePaths);
 
     return app.exec();
 }

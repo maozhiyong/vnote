@@ -190,7 +190,7 @@ bool VMdEditor::scrollToBlock(int p_blockNumber)
 }
 
 // Get the visual offset of a block.
-#define GETVISUALOFFSETY (contentOffsetY() + (int)rect.y())
+#define GETVISUALOFFSETY(x) (contentOffsetY() + (int)(x).y())
 
 void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
 {
@@ -213,9 +213,9 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
     bool moved = false;
 
     QAbstractTextDocumentLayout *layout = document()->documentLayout();
-    QRectF rect = layout->blockBoundingRect(p_block);
-    int y = GETVISUALOFFSETY;
-    int rectHeight = (int)rect.height();
+    QRectF rt = layout->blockBoundingRect(p_block);
+    int y = GETVISUALOFFSETY(rt);
+    int rectHeight = (int)rt.height();
 
     // Handle the case rectHeight >= height.
     if (rectHeight >= height) {
@@ -224,18 +224,18 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
             while (y + rectHeight < height && vbar->value() > vbar->minimum()) {
                 moved = true;
                 vbar->setValue(vbar->value() - vbar->singleStep());
-                rect = layout->blockBoundingRect(p_block);
-                rectHeight = (int)rect.height();
-                y = GETVISUALOFFSETY;
+                rt = layout->blockBoundingRect(p_block);
+                rectHeight = (int)rt.height();
+                y = GETVISUALOFFSETY(rt);
             }
         } else if (y > 0) {
             // Need to scroll down.
             while (y > 0 && vbar->value() < vbar->maximum()) {
                 moved = true;
                 vbar->setValue(vbar->value() + vbar->singleStep());
-                rect = layout->blockBoundingRect(p_block);
-                rectHeight = (int)rect.height();
-                y = GETVISUALOFFSETY;
+                rt = layout->blockBoundingRect(p_block);
+                rectHeight = (int)rt.height();
+                y = GETVISUALOFFSETY(rt);
             }
 
             if (y < 0) {
@@ -245,36 +245,28 @@ void VMdEditor::makeBlockVisible(const QTextBlock &p_block)
             }
         }
 
-        if (moved) {
-            qDebug() << "scroll to make huge block visible";
-        }
-
         return;
     }
 
+    // There is an extra line leading in the layout, so there will always be a scroll
+    // action to scroll the page down.
     while (y < 0 && vbar->value() > vbar->minimum()) {
         moved = true;
         vbar->setValue(vbar->value() - vbar->singleStep());
-        rect = layout->blockBoundingRect(p_block);
-        rectHeight = (int)rect.height();
-        y = GETVISUALOFFSETY;
+        rt = layout->blockBoundingRect(p_block);
+        y = GETVISUALOFFSETY(rt);
     }
 
     if (moved) {
-        qDebug() << "scroll page down to make block visible";
         return;
     }
 
     while (y + rectHeight > height && vbar->value() < vbar->maximum()) {
         moved = true;
         vbar->setValue(vbar->value() + vbar->singleStep());
-        rect = layout->blockBoundingRect(p_block);
-        rectHeight = (int)rect.height();
-        y = GETVISUALOFFSETY;
-    }
-
-    if (moved) {
-        qDebug() << "scroll page up to make block visible";
+        rt = layout->blockBoundingRect(p_block);
+        rectHeight = (int)rt.height();
+        y = GETVISUALOFFSETY(rt);
     }
 }
 
@@ -306,8 +298,8 @@ void VMdEditor::contextMenuEvent(QContextMenuEvent *p_event)
                         emit m_object->discardAndRead();
                     });
 
-            QAction *toggleLivePreviewAct = new QAction(tr("Toggle Live Preview"), menu.data());
-            toggleLivePreviewAct->setToolTip(tr("Toggle live preview of diagrams"));
+            QAction *toggleLivePreviewAct = new QAction(tr("Live Preview for Diagrams"), menu.data());
+            toggleLivePreviewAct->setToolTip(tr("Toggle live preview panel for diagrams"));
             connect(toggleLivePreviewAct, &QAction::triggered,
                     this, [this]() {
                         m_editTab->toggleLivePreview();
@@ -396,9 +388,9 @@ bool VMdEditor::isBlockVisible(const QTextBlock &p_block)
     }
 
     QAbstractTextDocumentLayout *layout = document()->documentLayout();
-    QRectF rect = layout->blockBoundingRect(p_block);
-    int y = GETVISUALOFFSETY;
-    int rectHeight = (int)rect.height();
+    QRectF rt = layout->blockBoundingRect(p_block);
+    int y = GETVISUALOFFSETY(rt);
+    int rectHeight = (int)rt.height();
 
     return (y >= 0 && y < height) || (y < 0 && y + rectHeight > 0);
 }
@@ -433,7 +425,8 @@ static QString headerSequenceStr(const QVector<int> &p_sequence)
     return res;
 }
 
-static void insertSequenceToHeader(QTextBlock p_block,
+static void insertSequenceToHeader(QTextCursor& p_cursor,
+                                   const QTextBlock &p_block,
                                    QRegExp &p_reg,
                                    QRegExp &p_preReg,
                                    const QString &p_seq)
@@ -454,20 +447,24 @@ static void insertSequenceToHeader(QTextBlock p_block,
 
     Q_ASSERT(start <= end);
 
-    QTextCursor cursor(p_block);
-    cursor.setPosition(p_block.position() + start);
+    p_cursor.setPosition(p_block.position() + start);
     if (start != end) {
-        cursor.setPosition(p_block.position() + end, QTextCursor::KeepAnchor);
+        p_cursor.setPosition(p_block.position() + end, QTextCursor::KeepAnchor);
     }
 
     if (p_seq.isEmpty()) {
-        cursor.removeSelectedText();
+        p_cursor.removeSelectedText();
     } else {
-        cursor.insertText(p_seq + ' ');
+        p_cursor.insertText(p_seq + ' ');
     }
 }
 
-void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
+void VMdEditor::updateHeaderSequenceByConfigChange()
+{
+    updateHeadersHelper(m_mdHighlighter->getHeaderRegions(), true);
+}
+
+void VMdEditor::updateHeadersHelper(const QVector<VElementRegion> &p_headerRegions, bool p_configChanged)
 {
     QTextDocument *doc = document();
 
@@ -496,7 +493,7 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
                        << block.text();
         }
 
-        if ((block.userState() == HighlightBlockState::Normal)
+        if ((block.userState() == HighlightBlockState::Header)
             && headerReg.exactMatch(block.text())) {
             int level = headerReg.cap(1).length();
             VTableOfContentItem header(headerReg.cap(2).trimmed(),
@@ -528,6 +525,11 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
     QVector<int> seqs(7, 0);
     QRegExp preReg(VUtils::c_headerPrefixRegExp);
     int curLevel = baseLevel - 1;
+    QTextCursor cursor(doc);
+    if(autoSequence || p_configChanged) {
+        cursor.beginEditBlock();
+    }
+
     for (int i = 0; i < headers.size(); ++i) {
         VTableOfContentItem &item = headers[i];
         while (item.m_level > curLevel + 1) {
@@ -538,7 +540,7 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
                                                  curLevel,
                                                  -1,
                                                  m_headers.size()));
-            if (autoSequence) {
+            if (autoSequence || p_configChanged) {
                 addHeaderSequence(seqs, curLevel, headingSequenceBaseLevel);
             }
         }
@@ -546,13 +548,14 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
         item.m_index = m_headers.size();
         m_headers.append(item);
         curLevel = item.m_level;
-        if (autoSequence) {
+        if (autoSequence || p_configChanged) {
             addHeaderSequence(seqs, item.m_level, headingSequenceBaseLevel);
 
-            QString seqStr = headerSequenceStr(seqs);
+            QString seqStr = autoSequence ? headerSequenceStr(seqs) : "";
             if (headerSequences[i] != seqStr) {
                 // Insert correct sequence.
-                insertSequenceToHeader(doc->findBlockByNumber(headerBlockNumbers[i]),
+                insertSequenceToHeader(cursor,
+                                       doc->findBlockByNumber(headerBlockNumbers[i]),
                                        headerReg,
                                        preReg,
                                        seqStr);
@@ -560,9 +563,18 @@ void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
         }
     }
 
+    if (autoSequence || p_configChanged) {
+        cursor.endEditBlock();
+    }
+
     emit headersChanged(m_headers);
 
     updateCurrentHeader();
+}
+
+void VMdEditor::updateHeaders(const QVector<VElementRegion> &p_headerRegions)
+{
+    updateHeadersHelper(p_headerRegions, false);
 }
 
 void VMdEditor::updateCurrentHeader()
@@ -754,7 +766,8 @@ void VMdEditor::insertFromMimeData(const QMimeData *p_source)
     if (p_source->hasHtml()) {
         // Handle <img>.
         QRegExp reg("<img ([^>]*)src=\"([^\"]+)\"([^>]*)>");
-        if (reg.indexIn(p_source->html()) != -1) {
+        QString html(p_source->html());
+        if (reg.indexIn(html) != -1 && VUtils::onlyHasImgInHtml(html)) {
             if (p_source->hasImage()) {
                 // Both image data and URL are embedded.
                 VSelectDialog dialog(tr("Insert From Clipboard"), this);
@@ -846,9 +859,15 @@ void VMdEditor::insertFromMimeData(const QMimeData *p_source)
                 int selection = dialog.getSelection();
                 if (selection == 0) {
                     // Insert as image.
-                    QUrl url(text);
+                    QUrl url;
+                    if (QFileInfo::exists(text)) {
+                        url = QUrl::fromLocalFile(text);
+                    } else {
+                        url = QUrl(text);
+                    }
+
                     if (url.isValid()) {
-                        m_editOps->insertImageFromURL(QUrl(text));
+                        m_editOps->insertImageFromURL(url);
                     }
 
                     return;

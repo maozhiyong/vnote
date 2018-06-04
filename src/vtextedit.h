@@ -5,7 +5,7 @@
 #include <QTextBlock>
 
 #include "vlinenumberarea.h"
-#include "vconstants.h"
+#include "vtextdocumentlayout.h"
 
 class VTextDocumentLayout;
 class QPainter;
@@ -33,7 +33,13 @@ public:
 
     void setLineNumberColor(const QColor &p_foreground, const QColor &p_background);
 
+    int firstVisibleBlockNumber() const;
+
     QTextBlock firstVisibleBlock() const;
+
+    QTextBlock lastVisibleBlock() const;
+
+    void visibleBlockRange(int &p_first, int &p_last) const;
 
     void clearBlockImages();
 
@@ -55,7 +61,7 @@ public:
 
     void setImageLineColor(const QColor &p_color);
 
-    void relayout(const QSet<int> &p_blocks);
+    void relayout(const OrderedIntSet &p_blocks);
 
     void setCursorBlockMode(CursorBlock p_mode);
 
@@ -64,6 +70,8 @@ public:
     void setCursorLineBlockBg(const QColor &p_bg);
 
     void relayout();
+
+    void relayoutVisibleBlocks();
 
     void setDisplayScaleFactor(qreal p_factor);
 

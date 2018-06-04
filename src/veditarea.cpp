@@ -33,7 +33,6 @@ VEditArea::VEditArea(QWidget *parent)
 
     registerCaptainTargets();
 
-
     QString keySeq = g_config->getShortcutKeySequence("ActivateNextTab");
     qDebug() << "set ActivateNextTab shortcut to" << keySeq;
     QShortcut *activateNextTab = new QShortcut(QKeySequence(keySeq), this);
@@ -811,8 +810,9 @@ bool VEditArea::handleKeyNavigation(int p_key, bool &p_succeed)
     return ret;
 }
 
-int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files)
+int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files, bool p_oneByOne)
 {
+    VFile *curFile = NULL;
     int nrOpened = 0;
     for (auto const & info : p_files) {
         QString filePath = VUtils::validFilePathToOpen(info.m_file);
@@ -828,11 +828,23 @@ int VEditArea::openFiles(const QVector<VFileSessionInfo> &p_files)
         VEditTab *tab = openFile(file, info.m_mode, true);
         ++nrOpened;
 
+        if (info.m_active) {
+            curFile = file;
+        }
+
         VEditTabInfo tabInfo;
         tabInfo.m_editTab = tab;
         info.toEditTabInfo(&tabInfo);
 
         tab->tryRestoreFromTabInfo(tabInfo);
+
+        if (p_oneByOne) {
+            QCoreApplication::sendPostedEvents();
+        }
+    }
+
+    if (curFile) {
+        openFile(curFile, OpenFileMode::Read, false);
     }
 
     return nrOpened;
@@ -1118,7 +1130,8 @@ void VEditArea::recordClosedFile(const VFileSessionInfo &p_file)
     }
 
     m_lastClosedFiles.push(p_file);
-    qDebug() << "pushed closed file" << p_file.m_file;
+
+    emit fileClosed(p_file.m_file);
 }
 
 void VEditArea::handleFileTimerTimeout()

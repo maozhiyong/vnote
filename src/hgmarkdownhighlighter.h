@@ -148,7 +148,12 @@ struct VElementRegion
     // Whether this region contains @p_pos.
     bool contains(int p_pos) const
     {
-        return m_startPos <= p_pos && m_endPos >= p_pos;
+        return m_startPos <= p_pos && m_endPos > p_pos;
+    }
+
+    bool intersect(int p_start, int p_end) const
+    {
+        return !(p_end <= m_startPos || p_start >= m_endPos);
     }
 
     bool operator==(const VElementRegion &p_other) const
@@ -167,6 +172,11 @@ struct VElementRegion
         } else {
             return false;
         }
+    }
+
+    QString toString() const
+    {
+        return QString("[%1,%2)").arg(m_startPos).arg(m_endPos);
     }
 };
 
@@ -231,6 +241,8 @@ private slots:
     // @p_fast: if true, just parse and update styles.
     void startParseAndHighlight(bool p_fast = false);
 
+    void completeHighlight();
+
 private:
     struct HeaderBlockInfo
     {
@@ -277,9 +289,6 @@ private:
 
     int m_numOfCodeBlockHighlightsToRecv;
 
-    // All HTML comment regions.
-    QVector<VElementRegion> m_commentRegions;
-
     // All image link regions.
     QVector<VElementRegion> m_imageRegions;
 
@@ -311,6 +320,21 @@ private:
 
     bool m_enableMathjax;
 
+    // Inline code regions for each block.
+    // VElementRegion's position is relative position within a block.
+    QHash<int, QVector<VElementRegion>> m_inlineCodeRegions;
+
+    QHash<int, QVector<VElementRegion>> m_boldItalicRegions;
+
+    // Including links and images.
+    QHash<int, QVector<VElementRegion>> m_linkRegions;
+
+    // Comment regions for each block.
+    QHash<int, QVector<VElementRegion>> m_commentRegions;
+
+    // Whether need to signal out changes when highlight completes.
+    bool m_signalOut;
+
     char *content;
     int capacity;
     pmh_element **result;
@@ -321,14 +345,14 @@ private:
 
     void highlightCodeBlock(const QTextBlock &p_block, const QString &p_text);
 
-    void highlightMathJax(const QString &p_text);
+    void highlightMathJax(const QTextBlock &p_block, const QString &p_text);
 
     // Highlight links using regular expression.
     // PEG Markdown Highlight treat URLs with spaces illegal. This function is
     // intended to complement this.
     void highlightLinkWithSpacesInURL(const QString &p_text);
 
-    void parse(bool p_fast = false);
+    void parse();
 
     void parseInternal();
 
@@ -358,6 +382,19 @@ private:
     // Fetch all the verbatim blocks from parsing result.
     void initVerbatimBlocksFromResult();
 
+    // Fetch all the inlnie code regions from parsing result.
+    void initInlineCodeRegionsFromResult();
+
+    // Fetch all bold/italic regions from parsing result.
+    void initBoldItalicRegionsFromResult();
+
+    // Fetch all bold/italic regions from parsing result.
+    void initLinkRegionsFromResult();
+
+    void initBlockElementRegionOne(QHash<int, QVector<VElementRegion>> &p_regs,
+                                   unsigned long p_pos,
+                                   unsigned long p_end);
+
     // Whether @p_block is totally inside a HTML comment.
     bool isBlockInsideCommentRegion(const QTextBlock &p_block) const;
 
@@ -373,9 +410,6 @@ private:
     // Highlight color column in code block.
     void highlightCodeBlockColorColumn(const QString &p_text);
 
-    // Check if [p_pos, p_end) is a valid header.
-    bool isValidHeader(unsigned long p_pos, unsigned long p_end);
-
     bool isValidHeader(const QString &p_text);
 
     VTextBlockData *currentBlockData() const;
@@ -385,6 +419,14 @@ private:
     // Highlight headers using regular expression first instead of waiting for
     // another parse.
     void highlightHeaderFast(int p_blockNumber, const QString &p_text);
+
+    int findMathjaxMarker(int p_blockNumber,
+                          const QString &p_text,
+                          int p_pos,
+                          QRegExp &p_reg,
+                          int p_markerLength);
+
+    bool isValidMathjaxRegion(int p_blockNumber, int p_start, int p_end);
 };
 
 inline const QVector<VElementRegion> &HGMarkdownHighlighter::getHeaderRegions() const

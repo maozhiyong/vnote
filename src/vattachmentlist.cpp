@@ -13,16 +13,17 @@
 #include "vlineedit.h"
 
 extern VConfigManager *g_config;
+
 extern VMainWindow *g_mainWin;
 
+const QString VAttachmentList::c_infoShortcutSequence = "F2";
+
 VAttachmentList::VAttachmentList(QWidget *p_parent)
-    : QWidget(p_parent), VButtonPopupWidget(this), m_file(NULL)
+    : QWidget(p_parent),
+      VButtonPopupWidget(this),
+      m_initialized(false),
+      m_file(NULL)
 {
-    setupUI();
-
-    initActions();
-
-    updateContent();
 }
 
 void VAttachmentList::setupUI()
@@ -118,33 +119,10 @@ void VAttachmentList::setupUI()
     setLayout(mainLayout);
 }
 
-void VAttachmentList::initActions()
-{
-    m_openAct = new QAction(tr("&Open"), this);
-    m_openAct->setToolTip(tr("Open current attachment file"));
-    connect(m_openAct, &QAction::triggered,
-            this, [this]() {
-                QListWidgetItem *item = m_attachmentList->currentItem();
-                handleItemActivated(item);
-            });
-
-    m_deleteAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_attachment.svg"),
-                              tr("&Delete"),
-                              this);
-    m_deleteAct->setToolTip(tr("Delete selected attachments"));
-    connect(m_deleteAct, &QAction::triggered,
-            this, &VAttachmentList::deleteSelectedItems);
-
-    m_sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
-                            tr("&Sort"),
-                            this);
-    m_sortAct->setToolTip(tr("Sort attachments manually"));
-    connect(m_sortAct, &QAction::triggered,
-            this, &VAttachmentList::sortItems);
-}
-
 void VAttachmentList::setFile(VNoteFile *p_file)
 {
+    init();
+
     m_file = p_file;
 
     updateButtonState();
@@ -264,16 +242,30 @@ void VAttachmentList::handleContextMenuRequested(QPoint p_pos)
         return;
     }
 
+    int selectedSize = m_attachmentList->selectedItems().size();
     if (item) {
         if (!item->isSelected()) {
             m_attachmentList->setCurrentItem(item, QItemSelectionModel::ClearAndSelect);
         }
 
-        if (m_attachmentList->selectedItems().size() == 1) {
-            menu.addAction(m_openAct);
+        if (selectedSize == 1) {
+            QAction *openAct = new QAction(tr("&Open"), &menu);
+            openAct->setToolTip(tr("Open current attachment file"));
+            connect(openAct, &QAction::triggered,
+                    this, [this]() {
+                        QListWidgetItem *item = m_attachmentList->currentItem();
+                        handleItemActivated(item);
+                    });
+            menu.addAction(openAct);
         }
 
-        menu.addAction(m_deleteAct);
+        QAction *deleteAct = new QAction(VIconUtils::menuDangerIcon(":/resources/icons/delete_attachment.svg"),
+                                         tr("&Delete"),
+                                         &menu);
+        deleteAct->setToolTip(tr("Delete selected attachments"));
+        connect(deleteAct, &QAction::triggered,
+                this, &VAttachmentList::deleteSelectedItems);
+        menu.addAction(deleteAct);
     }
 
     m_attachmentList->update();
@@ -283,7 +275,25 @@ void VAttachmentList::handleContextMenuRequested(QPoint p_pos)
             menu.addSeparator();
         }
 
-        menu.addAction(m_sortAct);
+        QAction *sortAct = new QAction(VIconUtils::menuIcon(":/resources/icons/sort.svg"),
+                                       tr("&Sort"),
+                                       &menu);
+        sortAct->setToolTip(tr("Sort attachments manually"));
+        connect(sortAct, &QAction::triggered,
+                this, &VAttachmentList::sortItems);
+        menu.addAction(sortAct);
+    }
+
+    if (selectedSize == 1) {
+        menu.addSeparator();
+
+        QAction *fileInfoAct = new QAction(VIconUtils::menuIcon(":/resources/icons/note_info.svg"),
+                                           tr("&Info (Rename)\t%1").arg(VUtils::getShortcutText(c_infoShortcutSequence)),
+                                           &menu);
+        fileInfoAct->setToolTip(tr("View and edit current attachment's information"));
+        connect(fileInfoAct, &QAction::triggered,
+                this, &VAttachmentList::attachmentInfo);
+        menu.addAction(fileInfoAct);
     }
 
     if (!menu.actions().isEmpty()) {
@@ -445,7 +455,7 @@ void VAttachmentList::handleListItemCommitData(QWidget *p_itemEdit)
         item->setText(oldText);
     } else {
         if (!m_file->renameAttachment(oldText, text)) {
-            VUtils::showMessage(QMessageBox::Information,
+            VUtils::showMessage(QMessageBox::Warning,
                                 tr("Rename Attachment"),
                                 tr("Fail to rename attachment <span style=\"%1\">%2</span>.")
                                   .arg(g_config->c_dataTextStyle)
@@ -453,7 +463,7 @@ void VAttachmentList::handleListItemCommitData(QWidget *p_itemEdit)
                                 "",
                                 QMessageBox::Ok,
                                 QMessageBox::Ok,
-                                this);
+                                g_mainWin);
             // Recover to old name.
             item->setText(oldText);
         } else {
@@ -499,6 +509,8 @@ bool VAttachmentList::handleDropEvent(QDropEvent *p_event)
         return false;
     }
 
+    init();
+
     const QMimeData *mime = p_event->mimeData();
     if (mime->hasFormat("text/uri-list") && mime->hasUrls()) {
         // Add attachments.
@@ -531,6 +543,8 @@ bool VAttachmentList::handleDropEvent(QDropEvent *p_event)
 
 void VAttachmentList::handleAboutToShow()
 {
+    init();
+
     updateContent();
 
     checkAttachments();
@@ -619,7 +633,68 @@ void VAttachmentList::checkAttachments()
 
 void VAttachmentList::showEvent(QShowEvent *p_event)
 {
+    init();
+
     QWidget::showEvent(p_event);
 
     processShowEvent(p_event);
+}
+
+void VAttachmentList::init()
+{
+    if (m_initialized) {
+        return;
+    }
+
+    m_initialized = true;
+
+    setupUI();
+
+    QShortcut *infoShortcut = new QShortcut(QKeySequence(c_infoShortcutSequence), this);
+    infoShortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(infoShortcut, &QShortcut::activated,
+            this, &VAttachmentList::attachmentInfo);
+
+    updateContent();
+}
+
+void VAttachmentList::attachmentInfo()
+{
+    QListWidgetItem *item = m_attachmentList->currentItem();
+    if (!item) {
+        return;
+    }
+
+    QString oldName = item->data(Qt::UserRole).toString();
+    QString name = VUtils::promptForFileName(tr("Attachment Information"),
+                                             tr("Rename attachment (%1):").arg(oldName),
+                                             oldName,
+                                             [this](const QString &p_name) {
+                                                if (m_file->findAttachment(p_name, false) > -1) {
+                                                    return true;
+                                                }
+
+                                                return false;
+                                             },
+                                             g_mainWin);
+
+    if (name.isEmpty()) {
+        return;
+    }
+
+    if (!m_file->renameAttachment(oldName, name)) {
+        VUtils::showMessage(QMessageBox::Warning,
+                            tr("Attachment Information"),
+                            tr("Fail to rename attachment <span style=\"%1\">%2</span>.")
+                              .arg(g_config->c_dataTextStyle)
+                              .arg(oldName),
+                            "",
+                            QMessageBox::Ok,
+                            QMessageBox::Ok,
+                            g_mainWin);
+    } else {
+        // Change the data.
+        item->setData(Qt::UserRole, name);
+        item->setText(name);
+    }
 }

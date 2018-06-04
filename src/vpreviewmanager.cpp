@@ -131,7 +131,7 @@ void VPreviewManager::fetchImageLinksFromRegions(QVector<VElementRegion> p_image
     QTextDocument *doc = m_editor->document();
 
     for (int i = 0; i < p_imageRegions.size(); ++i) {
-        VElementRegion &reg = p_imageRegions[i];
+        const VElementRegion &reg = p_imageRegions[i];
         QTextBlock block = doc->findBlock(reg.m_startPos);
         if (!block.isValid()) {
             continue;
@@ -140,7 +140,13 @@ void VPreviewManager::fetchImageLinksFromRegions(QVector<VElementRegion> p_image
         int blockStart = block.position();
         int blockEnd = blockStart + block.length() - 1;
         QString text = block.text();
-        Q_ASSERT(reg.m_endPos <= blockEnd);
+
+        // Since the image links update signal is emitted after a timer, during which
+        // the content may be changed.
+        if (reg.m_endPos > blockEnd) {
+            continue;
+        }
+
         ImageLinkInfo info(reg.m_startPos,
                            reg.m_endPos,
                            blockStart,
@@ -152,30 +158,30 @@ void VPreviewManager::fetchImageLinksFromRegions(QVector<VElementRegion> p_image
                 || isAllSpaces(text, reg.m_endPos - blockStart, blockEnd - blockStart))) {
             // Image block.
             info.m_isBlock = true;
-            info.m_linkUrl = fetchImagePathToPreview(text, info.m_linkShortUrl);
+            fetchImageInfoToPreview(text, info);
         } else {
             // Inline image.
             info.m_isBlock = false;
-            info.m_linkUrl = fetchImagePathToPreview(text.mid(reg.m_startPos - blockStart,
-                                                              reg.m_endPos - reg.m_startPos),
-                                                     info.m_linkShortUrl);
+            fetchImageInfoToPreview(text.mid(reg.m_startPos - blockStart,
+                                             reg.m_endPos - reg.m_startPos),
+                                    info);
         }
 
-        if (info.m_linkUrl.isEmpty()) {
+        if (info.m_linkUrl.isEmpty() || info.m_linkShortUrl.isEmpty()) {
             continue;
         }
 
         p_imageLinks.append(info);
 
-        qDebug() << "image region" << i
-                 << info.m_startPos << info.m_endPos << info.m_blockNumber
-                 << info.m_linkShortUrl << info.m_linkUrl << info.m_isBlock;
+        qDebug() << "image region" << i << info.toString();
     }
 }
 
-QString VPreviewManager::fetchImageUrlToPreview(const QString &p_text)
+QString VPreviewManager::fetchImageUrlToPreview(const QString &p_text, int &p_width, int &p_height)
 {
     QRegExp regExp(VUtils::c_imageLinkRegExp);
+
+    p_width = p_height = -1;
 
     int index = regExp.indexIn(p_text);
     if (index == -1) {
@@ -187,30 +193,48 @@ QString VPreviewManager::fetchImageUrlToPreview(const QString &p_text)
         return QString();
     }
 
-    return regExp.capturedTexts()[2].trimmed();
+    QString tmp(regExp.cap(7));
+    if (!tmp.isEmpty()) {
+        p_width = tmp.toInt();
+        if (p_width <= 0) {
+            p_width = -1;
+        }
+    }
+
+    tmp = regExp.cap(8);
+    if (!tmp.isEmpty()) {
+        p_height = tmp.toInt();
+        if (p_height <= 0) {
+            p_height = -1;
+        }
+    }
+
+    return regExp.cap(2).trimmed();
 }
 
-QString VPreviewManager::fetchImagePathToPreview(const QString &p_text, QString &p_url)
+void VPreviewManager::fetchImageInfoToPreview(const QString &p_text, ImageLinkInfo &p_info)
 {
-    p_url = fetchImageUrlToPreview(p_text);
-    if (p_url.isEmpty()) {
-        return p_url;
+    QString surl = fetchImageUrlToPreview(p_text, p_info.m_width, p_info.m_height);
+    p_info.m_linkShortUrl = surl;
+    if (surl.isEmpty()) {
+        p_info.m_linkUrl = surl;
+        return;
     }
 
     const VFile *file = m_editor->getFile();
 
     QString imagePath;
-    QFileInfo info(file->fetchBasePath(), p_url);
+    QFileInfo info(file->fetchBasePath(), surl);
 
     if (info.exists()) {
         if (info.isNativePath()) {
             // Local file.
             imagePath = QDir::cleanPath(info.absoluteFilePath());
         } else {
-            imagePath = p_url;
+            imagePath = surl;
         }
     } else {
-        QString decodedUrl(p_url);
+        QString decodedUrl(surl);
         VUtils::decodeUrl(decodedUrl);
         QFileInfo dinfo(file->fetchBasePath(), decodedUrl);
         if (dinfo.exists()) {
@@ -218,32 +242,37 @@ QString VPreviewManager::fetchImagePathToPreview(const QString &p_text, QString 
                 // Local file.
                 imagePath = QDir::cleanPath(dinfo.absoluteFilePath());
             } else {
-                imagePath = p_url;
+                imagePath = surl;
             }
         } else {
-            QUrl url(p_url);
-            imagePath = url.toString();
+            QUrl url(surl);
+            if (url.isLocalFile()) {
+                imagePath = url.toLocalFile();
+            } else {
+                imagePath = url.toString();
+            }
         }
     }
 
-    return imagePath;
+    p_info.m_linkUrl = imagePath;
 }
 
 QString VPreviewManager::imageResourceName(const ImageLinkInfo &p_link)
 {
-    QString name = p_link.m_linkShortUrl;
-    if (m_editor->containsImage(name)
-        || name.isEmpty()) {
+    // Add size info to the name.
+    QString name = QString("%1_%2_%3").arg(p_link.m_linkShortUrl)
+                                      .arg(p_link.m_width)
+                                      .arg(p_link.m_height);
+    if (m_editor->containsImage(name)) {
         return name;
     }
 
     // Add it to the resource.
-    QString imgPath = p_link.m_linkUrl;
-    QFileInfo info(imgPath);
     QPixmap image;
-    if (info.exists()) {
+    QString imgPath = p_link.m_linkUrl;
+    if (QFileInfo::exists(imgPath)) {
         // Local file.
-        image = QPixmap(imgPath);
+        image = VUtils::pixmapFromFile(imgPath);
     } else {
         // URL. Try to download it.
         m_downloader->download(imgPath);
@@ -254,7 +283,28 @@ QString VPreviewManager::imageResourceName(const ImageLinkInfo &p_link)
         return QString();
     }
 
-    m_editor->addImage(name, image);
+    // Resize the image.
+    Qt::TransformationMode tMode = Qt::SmoothTransformation;
+    qreal sf = VUtils::calculateScaleFactor();
+    if (p_link.m_width > 0) {
+        if (p_link.m_height > 0) {
+            m_editor->addImage(name, image.scaled(p_link.m_width * sf,
+                                                  p_link.m_height * sf,
+                                                  Qt::IgnoreAspectRatio,
+                                                  tMode));
+        } else {
+            m_editor->addImage(name, image.scaledToWidth(p_link.m_width * sf, tMode));
+        }
+    } else if (p_link.m_height > 0) {
+        m_editor->addImage(name, image.scaledToHeight(p_link.m_height * sf, tMode));
+    } else {
+        if (sf < 1.1) {
+            m_editor->addImage(name, image);
+        } else {
+            m_editor->addImage(name, image.scaledToWidth(image.width() * sf, tMode));
+        }
+    }
+
     return name;
 }
 
@@ -323,6 +373,7 @@ int VPreviewManager::calculateBlockMargin(const QTextBlock &p_block, int p_tabSt
 void VPreviewManager::updateBlockPreviewInfo(TS p_timeStamp,
                                              const QVector<ImageLinkInfo> &p_imageLinks)
 {
+    OrderedIntSet affectedBlocks;
     for (auto const & link : p_imageLinks) {
         QTextBlock block = m_document->findBlockByNumber(link.m_blockNumber);
         if (!block.isValid()) {
@@ -345,23 +396,27 @@ void VPreviewManager::updateBlockPreviewInfo(TS p_timeStamp,
                                               !link.m_isBlock,
                                               name,
                                               m_editor->imageSize(name));
-        blockData->insertPreviewInfo(info);
-
+        bool tsUpdated = blockData->insertPreviewInfo(info);
         imageCache(PreviewSource::ImageLink).insert(name, p_timeStamp);
+        if (!tsUpdated) {
+            // No need to relayout the block if only timestamp is updated.
+            affectedBlocks.insert(link.m_blockNumber, QMapDummyValue());
+            m_highlighter->addPossiblePreviewBlock(link.m_blockNumber);
+        }
 
         qDebug() << "block" << link.m_blockNumber
                  << imageCache(PreviewSource::ImageLink).size()
                  << blockData->toString();
     }
 
-    // TODO: may need to call m_editor->update()?
+    relayoutEditor(affectedBlocks);
 }
 
 void VPreviewManager::updateBlockPreviewInfo(TS p_timeStamp,
                                              PreviewSource p_source,
                                              const QVector<QSharedPointer<VImageToPreview> > &p_images)
 {
-    QSet<int> affectedBlocks;
+    OrderedIntSet affectedBlocks;
     for (auto const & img : p_images) {
         if (img.isNull()) {
             continue;
@@ -391,14 +446,13 @@ void VPreviewManager::updateBlockPreviewInfo(TS p_timeStamp,
         imageCache(p_source).insert(name, p_timeStamp);
         if (!tsUpdated) {
             // No need to relayout the block if only timestamp is updated.
-            affectedBlocks.insert(img->m_blockNumber);
+            affectedBlocks.insert(img->m_blockNumber, QMapDummyValue());
             m_highlighter->addPossiblePreviewBlock(img->m_blockNumber);
         }
     }
 
     // Relayout these blocks since they may not have been changed.
-    m_editor->relayout(affectedBlocks);
-    m_editor->update();
+    relayoutEditor(affectedBlocks);
 }
 
 void VPreviewManager::clearObsoleteImages(long long p_timeStamp, PreviewSource p_source)
@@ -418,7 +472,7 @@ void VPreviewManager::clearObsoleteImages(long long p_timeStamp, PreviewSource p
 void VPreviewManager::clearBlockObsoletePreviewInfo(long long p_timeStamp,
                                                     PreviewSource p_source)
 {
-    QSet<int> affectedBlocks;
+    OrderedIntSet affectedBlocks;
     QVector<int> obsoleteBlocks;
     const QSet<int> &blocks = m_highlighter->getPossiblePreviewBlocks();
     for (auto i : blocks) {
@@ -434,7 +488,7 @@ void VPreviewManager::clearBlockObsoletePreviewInfo(long long p_timeStamp,
         }
 
         if (blockData->clearObsoletePreview(p_timeStamp, p_source)) {
-            affectedBlocks.insert(i);
+            affectedBlocks.insert(i, QMapDummyValue());
         }
 
         if (blockData->getPreviews().isEmpty()) {
@@ -495,7 +549,7 @@ void VPreviewManager::checkBlocksForObsoletePreview(const QList<int> &p_blocks)
         return;
     }
 
-    QSet<int> affectedBlocks;
+    OrderedIntSet affectedBlocks;
     for (auto i : p_blocks) {
         QTextBlock block = m_document->findBlockByNumber(i);
         if (!block.isValid()) {
@@ -518,10 +572,31 @@ void VPreviewManager::checkBlocksForObsoletePreview(const QList<int> &p_blocks)
 
             PreviewSource ps = static_cast<PreviewSource>(i);
             if (blockData->clearObsoletePreview(timeStamp(ps), ps)) {
-                affectedBlocks.insert(i);
+                affectedBlocks.insert(i, QMapDummyValue());
             }
         }
     }
 
     m_editor->relayout(affectedBlocks);
+}
+
+void VPreviewManager::relayoutEditor(const OrderedIntSet &p_blocks)
+{
+    OrderedIntSet bs(p_blocks);
+    int first, last;
+    m_editor->visibleBlockRange(first, last);
+    for (int i = first; i <= last; ++i) {
+        bs.insert(i, QMapDummyValue());
+    }
+
+    m_editor->relayout(bs);
+
+    // We may get the wrong visible block range before relayout() updating the document size.
+    OrderedIntSet after;
+    int afterFirst = m_editor->firstVisibleBlockNumber();
+    for (int i = afterFirst; i < first; ++i) {
+        after.insert(i, QMapDummyValue());
+    }
+
+    m_editor->relayout(after);
 }
